@@ -127,7 +127,7 @@ function applyLocal(op, data) {
   switch (op.type) {
     case 'batch': {
       data.batches = data.batches || [];
-      upsertBy(data.batches, 'no', { no: String(d.no), flavour: d.flavour, date: d.date, mix: d.mix, start: d.start, temp: d.temp, hold: d.hold, cool: d.cool, end: d.end, bb: d.bb, pby: d.pby, tub: d.tub, large: d.large, small: d.small, napolis: d.napolis, tc: d.tc, label: d.label ? 'Yes' : '', tby: d.tby, comments: d.comments, status: d.status || (d.tub ? 'Tubbed' : 'Pasteurised'), lines: d.lines });
+      upsertBy(data.batches, 'no', { no: String(d.no), flavour: d.flavour, date: d.date, mix: d.mix, start: d.start, temp: d.temp, hold: d.hold, cool: d.cool, end: d.end, bb: d.bb, pby: d.pby, tub: d.tub, large: d.large, small: d.small, napolis: d.napolis, tc: d.tc, sw: d.sw, lw: d.lw, label: d.label ? 'Yes' : '', tby: d.tby, comments: d.comments, status: d.status || (d.tub ? 'Tubbed' : 'Pasteurised'), lines: d.lines });
       var n = parseInt(d.no, 10); if (n && n >= Number(data.settings['Next batch number'] || 0)) data.settings['Next batch number'] = n + 1;
       if (d.flavour && (data.flavours || []).indexOf(d.flavour) < 0) (data.flavours = data.flavours || []).push(d.flavour);
       break;
@@ -264,13 +264,27 @@ ROUTES.home = function () {
     (unsent && !navigator.onLine ? '<div class="due"><span>📶</span><span>' + unsent + ' record' + (unsent > 1 ? 's are' : ' is') + ' saved on this device and will send when there\'s internet.</span></div>' : '') +
     alerts +
     myMessages().map(function (m) { return '<div class="due" style="background:#eef0f8;border-color:#c9cde3;color:#1c2140"><span>✉️</span><span style="flex:1"><b>' + esc(m.from) + (m.to === 'Everyone' ? ' (to everyone)' : '') + ':</b> ' + esc(m.text) + ' <span class="muted small">' + esc(short(m.remind || m.date)) + '</span></span><button class="btn soft sm" data-seen="' + esc(m.id) + '">✓ Seen</button></div>'; }).join('') +
-    due.map(function (x) { return '<a class="due" href="#' + (links[x.key] || 'home') + '"><span>⏰</span><span>' + esc(x.text) + '</span></a>'; }).join('') +
+    todoHtml(due, links) +
     '<div class="tiles" style="margin-top:14px">' + tiles.map(function (t) {
       return '<a class="tile' + (t[4] ? ' dark' : '') + '" href="#' + t[0] + '"><span class="ic">' + t[1] + '</span><span><b>' + esc(t[2]) + '</b><br><small>' + esc(t[3]) + '</small></span></a>';
     }).join('') + '</div>' +
     '<p class="muted center" style="margin-top:28px">Last updated from Google: ' + (D().at ? new Date(D().at).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'never') + '</p>');
   $$('[data-seen]').forEach(function (b) { b.onclick = function () { var s = load('dk_seen', []); s.push(b.dataset.seen); save('dk_seen', s.slice(-200)); route(); }; });
+  $$('[data-ordered]').forEach(function (b) { b.onclick = function (ev) { ev.preventDefault(); record('ordered', { id: b.dataset.ordered, by: S.user }, 'Marked as ordered'); D().toOrder = (D().toOrder || []).filter(function (o) { return o.id !== b.dataset.ordered; }); save(LS.data, S.data); route(); }; });
 };
+// The "To do" board: what needs doing, for everyone
+function todoHtml(due, links) {
+  var T = D().todo || {}, boss = isOwner() || S.user === manager(), items = [];
+  var row = function (icon, html, href, extra) { return '<a class="row" href="' + (href || '#home') + '" style="text-decoration:none"><span style="display:flex;gap:10px;align-items:center"><span style="font-size:20px">' + icon + '</span><span>' + html + '</span></span>' + (extra || '') + '</a>'; };
+  due.forEach(function (x) { items.push(row('⏰', esc(x.text), '#' + (links[x.key] || 'home'))); });
+  (T.make || []).forEach(function (f, i) { items.push(row('🍦', (i ? 'Then make ' : 'Make next: ') + '<b>' + esc(f) + '</b> (' + setN('Standard order litres', 300) + ' L)', '#production')); });
+  (T.weddings || []).forEach(function (w) { items.push(row('💍', 'Wedding ' + esc(short(w.date)) + (w.flavours && w.flavours.length ? ' – keep aside: <b>' + esc(w.flavours.join(', ')) + '</b>' : ' – flavours not chosen yet'), boss ? '#weddings' : '#home')); });
+  (T.rotation || []).forEach(function (b) { items.push(row('⏳', 'Batch ' + esc(b.no) + ' ' + esc(b.flavour) + ' has been in stock ' + b.months + ' months – use it first', '#packing')); });
+  (D().toOrder || []).forEach(function (o) { items.push(row('🛒', 'To order: <b>' + esc(o.item) + '</b>' + (o.by ? ' <span class="muted small">(' + esc(o.by.split(' ')[0]) + ')</span>' : ''), '#ingstock', boss && o.id ? '<button class="btn soft sm" data-ordered="' + esc(o.id) + '">Ordered ✓</button>' : '')); });
+  if (isOwner() && S.own && S.own.dash) (S.own.dash.lapsed || []).forEach(function (s) { items.push(row('🛎️', '<b>' + esc(s.shop) + '</b> hasn\'t ordered for ' + s.days + ' days (usually every ' + s.usual + ')', '#office')); });
+  if (!items.length) return '';
+  return '<div class="card" style="margin-top:6px"><h2 style="margin-bottom:6px">📋 To do</h2><div class="list">' + items.join('') + '</div></div>';
+}
 // Notes for the person using the app: to them by first name, to Both (Jonny & Paul) or to Everyone, from the last 14 days
 function myMessages() {
   var first = (S.user || '').split(' ')[0].toLowerCase(), seen = load('dk_seen', []), t = today(), from = addDays(t, -14);
@@ -293,6 +307,26 @@ function rq(n, q) { return q === '' || q == null || isNaN(Number(q)) ? q : isDai
 function inBase(q, u) { u = String(u || '').toLowerCase(); q = Number(q) || 0; return u === 'g' || u === 'ml' ? q / 1000 : q; }
 function byAmount(a, b) { return inBase(b.qty != null ? b.qty : b.amount, b.unit) - inBase(a.qty != null ? a.qty : a.amount, a.unit); }
 function owner() { return set('Owner name') || 'Jonny Campbell'; }
+// Past batches: only Jonny, or Paul once he has entered his passcode
+function canPast() { return office() || isOwner() || (S.user === manager() && mgrOK()); }
+function pastBatches() { return office() ? (D().batches || []) : (S.allB || []); }
+function loadPast() {
+  if (office() || !navigator.onLine) return Promise.resolve(null);
+  if (S.allB && Date.now() - S.allBAt < 120000 && S.allBFor === S.user) return Promise.resolve(S.allB);
+  var p = isOwner() ? ownerCall({ op: 'batches' }) : mgrCall({ op: 'batches' });
+  return p.then(function (r) { if (r.ok) { S.allB = r.batches; S.allBAt = Date.now(); S.allBFor = S.user; } return S.allB; }).catch(function () { return null; });
+}
+// Overrun for a batch (Jonny only): from the tubs made, and from tub weights
+function overrun(b) {
+  var SL = setN('Small tub ml', 150) / 1000, LL = setN('Large tub ml', 500) / 1000, NL = setN('Napoli litres', 5), dens = setN('Mix weight per litre (kg)', 1.1), o = {};
+  var has = function (v) { return v !== '' && v != null; }, mix = Number(b.mix) || 0;
+  if (mix && (has(b.small) || has(b.large))) { var ic = (Number(b.small) || 0) * SL + (Number(b.large) || 0) * LL + (Number(b.napolis) || 0) * NL; if (ic) o.yield = Math.round((ic - mix) / mix * 100); }
+  var ws = [], net = function (g, k) { return has(g) && Number(g) > 0 ? Number(g) - (Number(set(k)) || 0) : 0; };
+  var ns = net(b.sw, 'Empty small tub weight (g)'), nl = net(b.lw, 'Empty large tub weight (g)');
+  if (ns > 0) ws.push((dens * SL * 1000 - ns) / ns * 100); if (nl > 0) ws.push((dens * LL * 1000 - nl) / nl * 100);
+  if (ws.length) o.weight = Math.round(ws.reduce(function (a, x) { return a + x; }, 0) / ws.length);
+  return o;
+}
 function isOwner() { return S.user === owner() && !!S.jcode; }
 // Weights over 10 kg show in kg, under in grams. Milk and cream in whole litres.
 function disp(n, q, u) {
@@ -324,10 +358,17 @@ function recipeLines(flavour, mix) {
 ROUTES.production = function () {
   var bs = (D().batches || []).slice().sort(function (a, b) { return Number(b.no) - Number(a.no); });
   var open = bs.filter(function (b) { return b.status === 'Pasteurised'; });
+  var todays = bs.filter(function (b) { return b.status !== 'Pasteurised' && (b.date === today() || b.tub === today()) && !b.trimmed; });
+  if (S.user === manager() && S.wantPast && !mgrOK()) { S.wantPast = false; return mgrSignIn('production'); }
+  var past = canPast() ? pastBatches().slice().sort(function (a, b) { return Number(b.no) - Number(a.no); }).filter(function (b) { return b.status !== 'Pasteurised'; }) : null;
+  if (canPast() && !office() && !S.allB && navigator.onLine) loadPast().then(function (x) { if (x && (location.hash || '') === '#production') route(); });
   render(back() + '<h1>Production</h1>' +
     '<div class="card"><a class="btn" href="#batch/new">+ Start a new batch</a><p class="muted">Next batch number: <b>' + esc(set('Next batch number')) + '</b></p></div>' +
     (open.length ? '<div class="card"><h2>Waiting to be tubbed</h2><div class="list">' + open.map(batchRow).join('') + '</div></div>' : '') +
-    '<div class="card"><h2>Recent batches</h2><div class="list">' + (bs.filter(function (b) { return b.status !== 'Pasteurised'; }).slice(0, 25).map(batchRow).join('') || '<p class="muted">None yet.</p>') + '</div></div>');
+    (todays.length ? '<div class="card"><h2>Today</h2><div class="list">' + todays.map(batchRow).join('') + '</div></div>' : '') +
+    (past ? '<div class="card"><h2>Past batches</h2><div class="list">' + (past.slice(0, 40).map(batchRow).join('') || '<p class="muted">' + (S.allB || office() ? 'None yet.' : 'Loading…') + '</p>') + '</div></div>'
+      : S.user === manager() ? '<div class="card"><button class="btn soft" id="p_past">🔒 Show past batches</button></div>' : ''));
+  if ($('#p_past')) $('#p_past').onclick = function () { S.wantPast = true; route(); };
 };
 // Tub counting rows on the batch record: "[ ] tubs high × [ ] stacks + [ ] odd = 123 big tubs"
 function tubRow(title, parts, totId, word) {
@@ -354,7 +395,7 @@ function batchRow(b) {
 
 ROUTES.batch = function (no) {
   var isNew = no === 'new';
-  var b = isNew ? null : (D().batches || []).find(function (x) { return String(x.no) === String(no); });
+  var b = isNew ? null : ((canPast() && pastBatches().find(function (x) { return String(x.no) === String(no); })) || (D().batches || []).find(function (x) { return String(x.no) === String(no); }));
   if (!isNew && !b) return render(back('production', 'Production') + '<div class="card">Batch not found.</div>');
   if (b && b.trimmed) return render(back('production', 'Production') + '<h1>Batch ' + esc(b.no) + '</h1><div class="card"><p><b>' + esc(b.flavour) + '</b> · made ' + esc(nice(b.date)) + (b.tub ? ' · tubbed ' + esc(nice(b.tub)) : '') + '</p><p class="muted">This batch is more than 2 weeks old, so its full record is kept on the office computer and in the Google Sheet, not on this device.</p></div>');
   var draft = S.drafts['batch:' + no];
@@ -392,6 +433,8 @@ ROUTES.batch = function (no) {
     tubRow('Small tubs (150ml)', [['b_strays', tc.sTrays, 'full trays'], '× ' + setN('Small tubs per tray', 48) + ' in a tray  +', ['b_sloose', tc.sLoose, 'loose tubs']], 'b_stot', 'small tubs') +
     tubRow('Big tubs (500ml)', [['b_lhigh', tc.lHigh, 'tubs high'], '×', ['b_lstacks', tc.lStacks, 'stacks'], '+', ['b_lodd', tc.lOdd, 'odd tubs']], 'b_ltot', 'big tubs') +
     tubRow('Napolis', [['b_nhigh', tc.nHigh, 'high'], '×', ['b_nstacks', tc.nStacks, 'stacks'], '+', ['b_nodd', tc.nOdd, 'odd']], 'b_ntot', 'Napolis') +
+    '<div class="grid2" style="margin-top:12px">' + field('Weight of a filled small tub (g)', inp('b_sw', x.sw, 'number')) + field('Weight of a filled big tub (g)', inp('b_lw', x.lw, 'number')) + '</div>' +
+    (isOwner() && !isNew ? (function () { var o = overrun(x); return '<div class="hint" style="margin-top:8px">🌬️ <b>Overrun</b> (only you see this): ' + (o.yield != null ? 'from tubs made <b>' + o.yield + '%</b>' : 'from tubs made – once the tubs are counted') + ' · ' + (o.weight != null ? 'from tub weights <b>' + o.weight + '%</b>' : 'from tub weights – once a tub is weighed') + (set('Empty small tub weight (g)') === '' ? '<br><span class="small muted">Put the empty tub weights on the Settings tab so the weight figure is exact.</span>' : '') + '</div>'; })() : '') +
     calcLine +
     '<label class="tick"><input type="checkbox" id="b_label"' + (x.label === true || x.label === 'Yes' ? ' checked' : '') + '> Labels checked (flavour, batch number, best before, allergens)</label>' +
     '<p class="noprint"><button class="btn soft sm" type="button" id="b_tubnow">Tubbing today</button></p></div>' +
@@ -439,7 +482,7 @@ ROUTES.batch = function (no) {
   }
   function gather() {
     return { no: val('b_no'), flavour: val('b_flavour'), date: val('b_date'), mix: num(val('b_mix')), start: val('b_start'), temp: num(val('b_temp')), hold: num(val('b_hold')), cool: num(val('b_cool')), end: num(val('b_end')),
-      bb: val('b_bb'), pby: val('b_pby'), tub: val('b_tub'), large: tubTot('l'), small: tubTot('s'), napolis: tubTot('n'), tc: tubDetail(), label: val('b_label'), tby: val('b_tby'), comments: val('b_comments'),
+      bb: val('b_bb'), pby: val('b_pby'), tub: val('b_tub'), large: tubTot('l'), small: tubTot('s'), napolis: tubTot('n'), tc: tubDetail(), sw: num(val('b_sw')), lw: num(val('b_lw')), label: val('b_label'), tby: val('b_tby'), comments: val('b_comments'),
       lines: lines.filter(function (l) { return l.ingredient; }).map(function (l) { return { ingredient: l.ingredient, qty: num(l.qty), unit: l.unit, batch: l.batch, useBy: l.useBy }; }), status: b && b.status === 'Finished' ? 'Finished' : '' };
   }
   var tmr;
@@ -504,10 +547,10 @@ ROUTES.cleaning = function (list, batch) {
     }).join('') || '<p class="muted">Nothing recorded yet.</p>') + '</div>' +
     '<div class="bar"><button class="btn" id="c_save">Confirm cleaning</button></div>');
   $('#c_save').onclick = function () {
-    if (!val('c_by')) return toast('Choose who did the cleaning');
     var com = val('c_com');
     var undone = $$('[data-l]').filter(function (e) { return !e.checked; });
-    if (undone.length && !com) return toast('Please add a comment for anything not done');
+    if (undone.length && !com) { $('#c_com').style.background = '#fff4d6'; toast('Saved – please add a comment for anything not done when you can'); }
+    if (!val('c_by')) $('#c_by').value = S.user;
     lists.forEach(function (l) {
       var its = {}; $$('[data-l="' + l + '"]').forEach(function (e) { its[e.dataset.it] = e.checked; });
       record('cleaning', { id: uid(), date: val('c_date'), list: l, by: val('c_by'), comments: com, batch: batch || '', items: its }, 'Cleaning confirmed');
@@ -556,8 +599,7 @@ ROUTES.temps = function (wk) {
     }).filter(function (x) { return Object.keys(x.readings).length || x.initials || x.action; });
     if (!out.length) return toast('Nothing to save yet');
     var bad = $$('td.bad input').filter(function (e) { var a = $('input[data-k=action][data-d="' + e.dataset.d + '"]').value.trim(); return !a; });
-    if (bad.length && !confirm(bad.length + ' reading(s) are outside the safe range with no action written. Save anyway?')) return;
-    record('temps', { days: out }, 'Temperatures saved');
+    record('temps', { days: out }, bad.length ? 'Saved – ' + bad.length + ' reading(s) out of range with no action written' : 'Temperatures saved');
     $('#app').removeAttribute('data-dirty');
     location.hash = 'home';
   };
@@ -612,7 +654,7 @@ ROUTES.deliveries = function () {
   $('#d_save').onclick = function () {
     var item = val('d_item');
     if (!item) return toast('What was delivered?');
-    if (!val('d_by')) return toast('Who checked it in?');
+    if (!val('d_by')) $('#d_by').value = S.user;
     var isNewIng = !ings.some(function (i) { return i.name.toLowerCase() === item.toLowerCase(); });
     if (isNewIng && !confirm('"' + item + '" isn\'t on the ingredient list yet. Add it as a new item?')) return;
     var t = num(val('d_temp'));
@@ -629,69 +671,109 @@ ROUTES.deliveries = function () {
 ROUTES.stock = function () {
   var per = setN('Small tubs per tray', 48), mine = isOwner(), t = today();
   if (mine && !S.own && navigator.onLine) loadOwn().then(function (x) { if (x && (location.hash || '').indexOf('#stock') === 0 && !$('#app').hasAttribute('data-dirty')) route(); });
-  // Jonny sees the previous counts; everyone else only sees what was entered today
+  // Jonny sees the previous counts and the forecast; everyone else only sees what was entered today
   var hist = mine ? ((S.own && S.own.iceStock) || D().iceStock || []) : [];
   var last = {}; hist.forEach(function (x) { if (x.date < t && (!last[x.flavour] || last[x.flavour].date <= x.date)) last[x.flavour] = x; });
+  var fc = {}; if (mine) ((S.own && S.own.insights && S.own.insights.flavours) || (D().insights && D().insights.flavours) || []).forEach(function (f) { fc[f.flavour] = f; });
   var todays = {}; (D().iceStock || []).forEach(function (x) { if (x.date === t) todays[x.flavour] = x; });
   var todayId = ((D().iceStock || []).filter(function (x) { return x.date === t && x.id; }).map(function (x) { return String(x.id).split(':')[0]; }).pop()) || '';
+  var wk = function (w) { return w == null ? '–' : w <= 3 ? '<b style="color:#b3261e">' + w + '</b>' : w; };
   render(back() + '<h1>Ice cream stock take</h1>' +
-    '<p class="muted">Large tubs: count the stacks and how high they\'re stacked (plus any odd ones). Small tubs: full trays of ' + per + ' plus any loose.</p>' +
+    '<p class="muted">Big tubs: how many stacks × how many tubs high (plus any odd ones). Small tubs: full trays of ' + per + ' plus any loose. Napolis: just count them. Anything not counted is highlighted – you can still save.</p>' +
     (todayId ? '<div class="hint">Today\'s count is filled in below – change anything and save again.</div>' : '') +
+    '<div id="s_miss"></div>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('s_date', t, 'date', mine ? '' : ' readonly')) + field('Counted by', staffSel('s_by', todayId ? ((D().iceStock || []).find(function (x) { return x.date === t; }) || {}).by : null)) + '</div></div>' +
-    '<div class="card scroll"><table class="t"><tr><th>Flavour</th><th>Large: stacks</th><th>× high</th><th>+ odd</th><th>Large total</th><th>Small: trays</th><th>+ loose</th><th>Small total</th>' + (mine ? '<th class="noprint">Last count</th>' : '') + '</tr>' +
-    (D().flavours || []).map(function (f, i) {
-      var l = last[f], c = todays[f] || {}, v = function (k) { return esc(c[k] == null ? '' : c[k]); };
+    '<div class="card scroll"><table class="t"><tr><th>Flavour</th><th>Big: stacks</th><th>× high</th><th>+ odd</th><th>Big total</th><th>Small: trays</th><th>+ loose</th><th>Small total</th><th>Napolis</th>' + (mine ? '<th class="noprint">Last count</th><th class="noprint">Weeks left<br><span class="small">small / big</span></th>' : '') + '</tr>' +
+    (D().flavours || []).map(function (f) {
+      var l = last[f], c = todays[f] || {}, v = function (k) { return esc(c[k] == null ? '' : c[k]); }, x = fc[f];
       return '<tr data-f="' + esc(f) + '"><td><b>' + esc(f) + '</b></td>' +
-        '<td><input data-k="stacks" inputmode="numeric" style="width:70px" value="' + v('stacks') + '"></td><td><input data-k="height" inputmode="numeric" style="width:70px" value="' + v('height') + '"></td><td><input data-k="lextra" inputmode="numeric" style="width:70px" value="' + v('lextra') + '"></td><td class="stat" data-t="large" style="font-size:20px">–</td>' +
-        '<td><input data-k="trays" inputmode="numeric" style="width:70px" value="' + v('trays') + '"></td><td><input data-k="loose" inputmode="numeric" style="width:70px" value="' + v('loose') + '"></td><td class="stat" data-t="small" style="font-size:20px">–</td>' +
-        (mine ? '<td class="muted small noprint">' + (l ? esc(short(l.date)) + ': ' + (l.large || 0) + ' L / ' + (l.small || 0) + ' S' : '–') + '</td>' : '') + '</tr>';
+        '<td><input data-k="stacks" inputmode="numeric" style="width:64px" value="' + v('stacks') + '"></td><td><input data-k="height" inputmode="numeric" style="width:64px" value="' + v('height') + '"></td><td><input data-k="lextra" inputmode="numeric" style="width:64px" value="' + v('lextra') + '"></td><td class="stat" data-t="large" style="font-size:20px">–</td>' +
+        '<td><input data-k="trays" inputmode="numeric" style="width:64px" value="' + v('trays') + '"></td><td><input data-k="loose" inputmode="numeric" style="width:64px" value="' + v('loose') + '"></td><td class="stat" data-t="small" style="font-size:20px">–</td>' +
+        '<td><input data-k="napolis" inputmode="numeric" style="width:64px" value="' + v('napolis') + '"></td>' +
+        (mine ? '<td class="muted small noprint">' + (l ? esc(short(l.date)) + ': ' + (l.small || 0) + ' S / ' + (l.large || 0) + ' B' + (l.napolis ? ' / ' + l.napolis + ' N' : '') : '–') + '</td><td class="small noprint">' + (x ? wk(x.weeksLeftS) + ' / ' + wk(x.weeksLeftL) : '–') + '</td>' : '') + '</tr>';
     }).join('') + '</table></div>' +
     '<div class="bar"><button class="btn" id="s_save">Save stock take</button></div>');
+  var AMBER = '#fff4d6';
   function calc(tr) {
     var g = function (k) { return Number(tr.querySelector('[data-k=' + k + ']').value) || 0; };
-    var any = $$('input', tr).some(function (e) { return e.value !== ''; });
+    var tubIn = ['stacks', 'height', 'lextra', 'trays', 'loose'].some(function (k) { return tr.querySelector('[data-k=' + k + ']').value !== ''; });
     var L = g('stacks') * g('height') + g('lextra'), Sm = g('trays') * per + g('loose');
-    tr.querySelector('[data-t=large]').textContent = any ? L : '–'; tr.querySelector('[data-t=small]').textContent = any ? Sm : '–';
-    return { any: any, flavour: tr.dataset.f, stacks: num(tr.querySelector('[data-k=stacks]').value), height: num(tr.querySelector('[data-k=height]').value), lextra: num(tr.querySelector('[data-k=lextra]').value), large: L, trays: num(tr.querySelector('[data-k=trays]').value), loose: num(tr.querySelector('[data-k=loose]').value), small: Sm };
+    tr.querySelector('[data-t=large]').textContent = tubIn ? L : '–'; tr.querySelector('[data-t=small]').textContent = tubIn ? Sm : '–';
+    tr.style.background = tubIn ? '' : AMBER;
+    return { any: tubIn, flavour: tr.dataset.f, stacks: num(tr.querySelector('[data-k=stacks]').value), height: num(tr.querySelector('[data-k=height]').value), lextra: num(tr.querySelector('[data-k=lextra]').value), large: L, trays: num(tr.querySelector('[data-k=trays]').value), loose: num(tr.querySelector('[data-k=loose]').value), small: Sm, napolis: num(tr.querySelector('[data-k=napolis]').value) };
   }
-  $$('tr[data-f] input').forEach(function (e) { e.oninput = function () { calc(e.closest('tr')); $('#app').setAttribute('data-dirty', '1'); }; });
-  $$('tr[data-f]').forEach(calc);
+  function missing() {
+    var rows = $$('tr[data-f]').map(calc), notC = rows.filter(function (r) { return !r.any; }).map(function (r) { return r.flavour; });
+    var noNap = rows.every(function (r) { return r.napolis === ''; });
+    $$('[data-k=napolis]').forEach(function (e) { e.style.background = noNap ? AMBER : ''; });
+    var msgs = [];
+    if (notC.length && notC.length < rows.length) msgs.push('Not counted yet: <b>' + notC.map(esc).join(', ') + '</b>');
+    if (noNap) msgs.push('No Napolis counted');
+    if (!val('s_by')) msgs.push('Who counted isn\'t chosen');
+    $('#s_miss').innerHTML = msgs.length ? '<div class="due" style="background:' + AMBER + ';border-color:#e3c46b;color:#5a4300"><span>⚠️</span><span>' + msgs.join(' · ') + '. You can still save.</span></div>' : '';
+    return rows;
+  }
+  $$('#app input, #app select').forEach(function (e) { e.addEventListener('input', function () { $('#app').setAttribute('data-dirty', '1'); missing(); }); e.addEventListener('change', missing); });
+  missing();
   $('#s_save').onclick = function () {
-    if (!val('s_by')) return toast('Who counted?');
-    var rows = $$('tr[data-f]').map(calc), counted = rows.filter(function (r) { return r.any; });
+    var rows = missing(), counted = rows.filter(function (r) { return r.any || r.napolis !== ''; });
     if (!counted.length) return toast('Nothing counted yet');
-    var missing = rows.length - counted.length;
-    if (missing && !confirm(missing + ' flavour(s) have no count. Save them as zero (none in stock)?')) return;
-    rows.forEach(function (r) { delete r.any; });
-    record('iceStock', { id: val('s_date') === t && todayId ? todayId : uid(), date: val('s_date'), by: val('s_by'), counts: rows }, 'Stock take saved');
+    counted.forEach(function (r) { delete r.any; });
+    var by = val('s_by') || S.user, skipped = rows.length - counted.length;
+    record('iceStock', { id: val('s_date') === t && todayId ? todayId : uid(), date: val('s_date'), by: by, counts: counted }, 'Stock take saved' + (skipped ? ' – ' + skipped + ' flavour' + (skipped > 1 ? 's' : '') + ' not counted' : ''));
     $('#app').removeAttribute('data-dirty'); location.hash = 'home';
   };
 };
 
-/* ---------- ingredient stock count ---------- */
+/* ---------- ingredient stock count (any unit, remembered) + cleaning products + reorder ---------- */
 ROUTES.ingstock = function () {
   var ings = (D().ingredients || []).filter(function (i) { return i.track; });
   var last = {}; (D().ingStock || []).forEach(function (x) { if (!last[x.ingredient] || last[x.ingredient].date <= x.date) last[x.ingredient] = x; });
+  var onOrder = {}; (D().toOrder || []).forEach(function (o) { onOrder[String(o.item).toLowerCase()] = o; });
   var cats = {}; ings.forEach(function (i) { (cats[i.category || 'Other'] = cats[i.category || 'Other'] || []).push(i); });
-  render(back() + '<h1>Ingredient stock</h1><p class="muted">Count what\'s on the shelves. Leave a box empty if you didn\'t count it. Anything not on the list – add it at the bottom and Jonny will be asked who supplies it.</p>' +
+  var catNames = Object.keys(cats).sort(function (a, b) { return (/clean/i.test(a) ? 1 : 0) - (/clean/i.test(b) ? 1 : 0) || (a < b ? -1 : 1); });
+  var units = Array.from(new Set(['kg', 'g', 'L', 'ml', 'buckets', 'slabs', 'boxes', 'jars', 'bottles', 'bags', 'tubs', 'rolls', 'packs', 'units'].concat(ings.map(function (i) { return i.countUnit; }).filter(Boolean))));
+  render(back() + '<h1>Stock – ingredients & cleaning products</h1><p class="muted">Count what\'s there in whatever unit makes sense (buckets, slabs, boxes, jars…) – the unit is remembered for next time. Leave a box empty if you didn\'t count it. Tap <b>Reorder</b> if something is running low.</p>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('i_date', today(), 'date')) + field('Counted by', staffSel('i_by')) + '</div></div>' +
-    Object.keys(cats).sort().map(function (c) {
+    catNames.map(function (c) {
       return '<div class="card"><h2>' + esc(c) + '</h2><table class="t">' + cats[c].map(function (i) {
-        var l = last[i.name];
-        return '<tr data-ing="' + esc(i.name) + '" data-unit="' + esc(i.unit || '') + '"><td>' + esc(i.name) + '</td><td style="width:140px"><input inputmode="decimal"></td><td style="width:60px">' + esc(i.unit || '') + '</td><td class="muted small">' + (l && isOwner() ? 'last ' + esc(l.qty) + ' (' + esc(short(l.date)) + ')' : '') + '</td></tr>';
+        var l = last[i.name], u = i.countUnit || i.unit || '', oo = onOrder[String(i.name).toLowerCase()];
+        return '<tr data-ing="' + esc(i.name) + '" data-cat="' + esc(c) + '" data-re="' + esc(i.reorderAt === '' || i.reorderAt == null ? '' : i.reorderAt) + '"><td>' + esc(i.name) + (i.reorderAt !== '' && i.reorderAt != null ? '<br><span class="small muted">reorder at ' + esc(i.reorderAt) + '</span>' : '') + '</td>' +
+          '<td style="width:110px"><input data-k="qty" inputmode="decimal"></td><td style="width:110px"><input data-k="unit" value="' + esc(u) + '" list="dl_iu"></td>' +
+          '<td style="width:130px">' + (oo ? '<span class="pill ok">On the order list</span>' : '<button class="btn soft sm" data-reorder="' + esc(i.name) + '" type="button">Reorder</button>') + '</td>' +
+          '<td class="muted small">' + (l && isOwner() ? 'last ' + esc(l.qty) + ' ' + esc(l.unit || '') + ' (' + esc(short(l.date)) + ')' : '') + '</td></tr>';
       }).join('') + '</table></div>';
     }).join('') +
     '<div class="card"><h2>Something not on the list?</h2><table class="t" id="i_new"></table><button class="btn soft sm" id="i_addrow" type="button">+ Add another</button></div>' +
-    '<div class="bar"><button class="btn" id="i_save">Save count</button></div>');
-  function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Ingredient name" data-k="name"></td><td style="width:140px"><input placeholder="Quantity" inputmode="decimal" data-k="qty"></td><td style="width:100px"><input placeholder="Unit" data-k="unit" list="dl_units2"></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); }
-  $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist><datalist id="dl_units2"><option value="kg"><option value="g"><option value="L"><option value="tubs"><option value="units"><option value="boxes"></datalist>');
+    '<div class="bar"><button class="btn" id="i_save">Save count</button></div>' +
+    '<datalist id="dl_iu">' + units.map(function (u) { return '<option value="' + esc(u) + '">'; }).join('') + '</datalist>');
+  var catOpts = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Packaging', 'Cleaning products', 'Other'])));
+  function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Name, e.g. Bleach" data-k="name"></td><td style="width:110px"><input placeholder="How many" inputmode="decimal" data-k="qty"></td><td style="width:110px"><input placeholder="Unit" data-k="unit" list="dl_iu"></td><td><select data-k="cat">' + catOpts.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); }
+  $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>');
   addRow(); $('#i_addrow').onclick = addRow;
+  // highlight anything at or below its reorder level as it's counted
+  function check(tr) {
+    var q = num(tr.querySelector('[data-k=qty]').value), re = tr.dataset.re, b = tr.querySelector('[data-reorder]');
+    var low = re !== '' && q !== '' && q <= Number(re);
+    tr.style.background = low ? '#fdecea' : '';
+    if (b) { b.className = low ? 'btn sm' : 'btn soft sm'; b.style.background = low ? '#b3261e' : ''; b.textContent = low ? 'Reorder ‼' : 'Reorder'; }
+  }
+  $$('tr[data-ing]').forEach(function (tr) { tr.querySelector('[data-k=qty]').addEventListener('input', function () { check(tr); }); });
+  $$('[data-reorder]').forEach(function (b) {
+    b.onclick = function () {
+      var tr = b.closest('tr');
+      record('reorder', { id: uid(), item: b.dataset.reorder, category: tr.dataset.cat, by: val('i_by') || S.user }, b.dataset.reorder + ' added to the order list');
+      (D().toOrder = D().toOrder || []).push({ item: b.dataset.reorder, by: S.user, date: today() });
+      b.outerHTML = '<span class="pill ok">On the order list</span>';
+    };
+  });
   $('#i_save').onclick = function () {
-    if (!val('i_by')) return toast('Who counted?');
-    var counts = $$('tr[data-ing]').map(function (tr) { return { ingredient: tr.dataset.ing, unit: tr.dataset.unit, qty: num(tr.querySelector('input').value) }; }).filter(function (c) { return c.qty !== ''; });
-    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) counts.push({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) === '' ? 0 : num(tr.querySelector('[data-k=qty]').value) }); });
+    var counts = $$('tr[data-ing]').map(function (tr) { return { ingredient: tr.dataset.ing, unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) }; }).filter(function (c) { return c.qty !== ''; });
+    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) counts.push({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), category: tr.querySelector('[data-k=cat]').value, unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) === '' ? 0 : num(tr.querySelector('[data-k=qty]').value) }); });
     if (!counts.length) return toast('Nothing counted yet');
-    record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by'), counts: counts }, 'Ingredient count saved');
+    var notC = $$('tr[data-ing]').length - $$('tr[data-ing]').filter(function (tr) { return tr.querySelector('[data-k=qty]').value !== ''; }).length;
+    counts.forEach(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }); if (g && c.unit) g.countUnit = c.unit; });
+    record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by') || S.user, counts: counts }, 'Count saved' + (notC ? ' – ' + notC + ' item' + (notC > 1 ? 's' : '') + ' not counted' : ''));
     location.hash = 'home';
   };
 };
@@ -846,14 +928,18 @@ ROUTES.recipes = function (f) {
 
 /* ---------- records: view & print ---------- */
 ROUTES.records = function (kind, from, to) {
-  kind = kind || 'batches'; to = to || today(); from = from || addDays(to, -31);
-  var kinds = [['batches', 'Batch records'], ['deliveries', 'Deliveries'], ['temps', 'Temperatures'], ['cleaning', 'Cleaning'], ['pest', 'Pest control']];
+  kind = kind || 'pack'; var from0 = from; to = to || today(); from = from || addDays(to, -31); if (!from0 && kind === 'pack') from = '';
+  var kinds = [['pack', '🖨️ Inspection pack'], ['batches', 'Batch records'], ['deliveries', 'Deliveries'], ['temps', 'Temperatures'], ['cleaning', 'Cleaning'], ['pest', 'Pest control']];
+  if (!from && (kind || 'pack') === 'pack') { var mm = new Date(); mm.setDate(1); mm.setMonth(mm.getMonth() - 1); from = iso(mm); mm.setMonth(mm.getMonth() + 1); mm.setDate(0); to = iso(mm); }
+  if ((kind === 'batches' || kind === 'pack' || !kind) && canPast() && !office() && !S.allB && navigator.onLine) loadPast().then(function (x) { if (x && (location.hash || '').indexOf('#records') === 0) route(); });
   if (isOwner()) kinds.push(['stock', 'Stock takes']); else if (kind === 'stock') kind = 'batches';
   if (kind === 'stock' && !S.own && navigator.onLine) loadOwn().then(function (x) { if (x && (location.hash || '').indexOf('#records/stock') === 0) route(); });
   var inRange = function (d) { return d && d >= from && d <= to; };
+  function bodyFor(kind) {
   var body = '';
   if (kind === 'batches') {
-    var bs = (D().batches || []).filter(function (b) { return inRange(b.date) || inRange(b.tub); }).sort(function (a, b) { return Number(a.no) - Number(b.no); });
+    if (!canPast()) return '<div class="card muted">Batch records are kept on the office computer. ' + (S.user === manager() ? '<a href="#production">Open Production</a> and tap "Show past batches" to enter your passcode.' : '') + '</div>';
+    var bs = pastBatches().filter(function (b) { return inRange(b.date) || inRange(b.tub); }).sort(function (a, b) { return Number(a.no) - Number(b.no); });
     body = bs.map(function (b) {
       return '<div class="card pagebreak"><h2>Batch ' + esc(b.no) + ' – ' + esc(b.flavour) + '</h2><table class="t">' +
         [['Date produced', nice(b.date)], ['Mix', b.mix ? b.mix + ' L' : ''], ['Pasteurisation start', b.start], ['Temperature reached', b.temp !== '' ? b.temp + ' °C' : ''], ['Held for', b.hold !== '' ? b.hold + ' mins' : ''],
@@ -880,6 +966,10 @@ ROUTES.records = function (kind, from, to) {
     var byDate = {}; ((S.own && S.own.iceStock) || D().iceStock || []).filter(function (x) { return inRange(x.date); }).forEach(function (x) { (byDate[x.date] = byDate[x.date] || []).push(x); });
     body = Object.keys(byDate).sort().reverse().map(function (d) { return '<div class="card"><h2>' + esc(nice(d)) + '</h2><table class="t"><tr><th>Flavour</th><th>Large</th><th>Small</th><th>Counted by</th></tr>' + byDate[d].map(function (x) { return '<tr><td>' + esc(x.flavour) + '</td><td>' + esc(x.large) + '</td><td>' + esc(x.small) + '</td><td>' + esc(x.by) + '</td></tr>'; }).join('') + '</table></div>'; }).join('') || '<div class="card muted">No stock takes in these dates.</div>';
   }
+  return body;
+  }
+  var body = kind === 'pack' ? '<div class="card noprint"><p>Everything an inspector usually asks for, for the dates above (last month to start with): temperatures, cleaning, pest control, deliveries' + (canPast() ? ' and batch records' : '') + '. Press <b>Print</b>.</p></div>' +
+    [['temps', 'Fridge & freezer temperatures'], ['cleaning', 'Cleaning'], ['pest', 'Pest control'], ['deliveries', 'Deliveries in']].concat(canPast() ? [['batches', 'Batch records']] : []).map(function (k) { return '<h2 class="pagebreak" style="margin-top:18px">' + esc(k[1]) + '</h2>' + bodyFor(k[0]); }).join('') : bodyFor(kind);
   render(back() + '<h1>Records</h1><div class="card noprint">' + kinds.map(function (k) { return '<a class="chip' + (k[0] === kind ? ' on' : '') + '" href="#records/' + k[0] + '/' + from + '/' + to + '">' + k[1] + '</a>'; }).join('') +
     '<div class="grid3" style="margin-top:10px">' + field('From', inp('rf', from, 'date')) + field('To', inp('rt', to, 'date')) + '<div><button class="btn" onclick="window.print()" style="margin-top:22px">Print</button></div></div>' +
     '<p class="muted small">Shows the last few months kept on this device. Everything is also in the Dukes Production Google Sheet.</p></div>' +
@@ -1059,7 +1149,15 @@ function dashHtml(d) {
   var months = (d.months || []).length ? '<h3>Shop orders by month</h3>' + svgBars(d.months.map(function (m) { var dt = new Date(m.month + '-01'); return { label: dt.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }), short: dt.toLocaleDateString('en-GB', { month: 'short' }), values: [m.value] }; }), [0], ['Shop orders'], { money: true, title: 'Shop order value by month' }) : '';
   var flTable = flRows.length ? '<h3>Flavours – last 4 weeks</h3><div class="scroll"><table class="t"><tr><th>Flavour</th><th>Litres</th><th>Share</th><th>vs 4 weeks before</th></tr>' + flRows.map(function (x) { return '<tr><td>' + esc(x.f) + '</td><td>' + Math.round(x.now) + '</td><td><span style="display:inline-block;height:8px;border-radius:0 4px 4px 0;background:#2a78d6;width:' + Math.round(tot4 ? x.now / tot4 * 120 : 0) + 'px;vertical-align:middle"></span> ' + (tot4 ? Math.round(x.now / tot4 * 100) : 0) + '%</td><td>' + arrow(x.before > 2 ? x.ch : null) + '</td></tr>'; }).join('') + '</table></div>' : '';
   var shopTable = (d.shops || []).length ? '<h3>Shops – last 4 weeks</h3><div class="scroll"><table class="t"><tr><th>Shop</th><th>Orders £</th><th>vs 4 weeks before</th><th>Tubs</th><th>Last order</th></tr>' + d.shops.map(function (s) { return '<tr><td>' + esc(s.shop) + '</td><td>' + money(s.value) + '</td><td>' + arrow(s.prev ? pct(s.value, s.prev) : null) + '</td><td>' + s.S + ' S / ' + s.L + ' L</td><td>' + esc(s.last ? short(s.last) : '–') + '</td></tr>'; }).join('') + '</table></div>' : '';
-  var body = tiles + (notes.length ? '<div class="hint"><b>What stands out</b><ul style="margin:6px 0 0 18px;padding:0">' + notes.map(function (n) { return '<li>' + n + '</li>'; }).join('') + '</ul></div>' : '') + weekly + flTable + shopTable + months;
+  var wk = function (w) { return w == null ? '–' : w <= 0 ? '<b style="color:#b3261e">will run out</b>' : w <= 3 ? '<b style="color:#b3261e">' + w + ' wks ⚠️</b>' : w + ' wks'; };
+  var lowT = (d.lowest || []).length ? '<h3>Running lowest – weeks left</h3><p class="muted small">From sales patterns, minus shop orders and weddings already booked.</p><table class="t"><tr><th>Flavour</th><th>Small tubs</th><th>Big tubs</th></tr>' + d.lowest.map(function (f) { return '<tr><td>' + esc(f.flavour) + '</td><td>' + wk(f.weeksLeftS) + '</td><td>' + wk(f.weeksLeftL) + '</td></tr>'; }).join('') + '</table>' : '';
+  var ov = d.overrun || {};
+  var ovT = '<h3>Overrun</h3>' + (ov.yieldAvg != null || ov.weightAvg != null ? '<p>Average of the last 10 batches: ' + (ov.yieldAvg != null ? 'from tubs made <b>' + ov.yieldAvg + '%</b>' : '') + (ov.yieldAvg != null && ov.weightAvg != null ? ' · ' : '') + (ov.weightAvg != null ? 'from tub weights <b>' + ov.weightAvg + '%</b>' : '') + '</p>' +
+    '<details><summary>By batch</summary><table class="t"><tr><th>Batch</th><th>Flavour</th><th>From tubs</th><th>From weights</th></tr>' + (ov.batches || []).map(function (b) { return '<tr><td>' + esc(b.no) + '</td><td>' + esc(b.flavour) + '</td><td>' + (b.yield != null ? b.yield + '%' : '–') + '</td><td>' + (b.weight != null ? b.weight + '%' : '–') + '</td></tr>'; }).join('') + '</table></details>' : '<p class="muted">Shows once batches have tub counts or tub weights.</p>');
+  var pr = (d.printed || []).filter(function (x) { return x.weeksLeft != null || x.est != null; });
+  var prT = '<h3>Printed tubs, lids & labels</h3><p class="muted small">These take up to ' + Math.round(((d.printed || [])[0] || {}).lead / 4.3 || 6) + ' months to arrive, so they\'re flagged when there\'s less than that (plus a month) left. Needs packaging counts and a few weeks of tubbing to work out.</p>' +
+    (pr.length ? '<div class="scroll"><table class="t"><tr><th>Item</th><th>In stock (≈)</th><th>Use per week</th><th>Weeks left</th></tr>' + pr.slice(0, 15).map(function (x) { return '<tr><td>' + esc(x.item) + '</td><td>' + (x.est == null ? '–' : x.est) + '</td><td>' + (x.weekly || '–') + '</td><td>' + (x.weeksLeft == null ? '–' : x.orderNow ? '<b style="color:#b3261e">' + x.weeksLeft + ' – order now</b>' : x.weeksLeft) + '</td></tr>'; }).join('') + '</table></div>' : '<p class="muted">Nothing to forecast yet.</p>');
+  var body = lowT + tiles + (notes.length ? '<div class="hint"><b>What stands out</b><ul style="margin:6px 0 0 18px;padding:0">' + notes.map(function (n) { return '<li>' + n + '</li>'; }).join('') + '</ul></div>' : '') + weekly + flTable + shopTable + months + ovT + prT;
   return '<div class="card"><h2>📈 Sales dashboard</h2><p class="muted small">Only you see this. It fills in as the Saturday stock takes, shop orders and wedding records build up – trends need about 4–8 weeks.</p>' +
     (body || '<p class="muted">Nothing to show yet – it starts after the next two Saturday stock takes.</p>') + '</div>';
 }
@@ -1083,7 +1181,23 @@ function salesHtml(sales) {
       return '<tr><td>' + esc(short(q.from)) + ' – ' + esc(short(q.to)) + '</td><td>' + st(q.shopTotal.S, q.shopTotal.L) + '</td><td>' + money(q.shopTotal.value) + '</td><td>' + q.weddings.S + '</td><td>' + st(q.farm.S, q.farm.L) + '</td><td>' + st(q.gone.S, q.gone.L) + '</td></tr>';
     }).join('') + '</table></div></details>' : '') + '</div>';
 }
+function drawPaulOffice(d) {
+  var wk = function (w, what) { return w == null ? '–' : w <= 0 ? '<b style="color:#b3261e">will run out</b>' : w <= 3 ? '<b style="color:#b3261e">' + w + ' wks ⚠️</b>' : w + ' wks'; };
+  render(back() + '<h1>Office</h1>' +
+    '<div class="tiles noprint" style="margin-bottom:16px"><a class="tile" href="#packing"><span class="ic">🧾</span><span><b>Shop orders</b><br><small>Packing list</small></span></a><a class="tile" href="#weddings"><span class="ic">💍</span><span><b>Weddings</b><br><small>Tubs out & in</small></span></a></div>' +
+    ((d.short || []).length ? '<div class="due bad"><span>💍</span><span><b>Make or keep aside for weddings:</b> ' + d.short.map(function (f) { return esc(f.flavour) + ' (' + f.shortfall + ' small tubs short)'; }).join(', ') + '</span></div>' : '') +
+    '<div class="card"><h2>Make next</h2>' + ((d.make || []).length ? '<ol style="margin:0 0 0 20px;font-size:18px">' + d.make.map(function (f) { return '<li>' + esc(f) + '</li>'; }).join('') + '</ol>' : '<p class="muted">Builds up as the Saturday stock takes come in.</p>') + '</div>' +
+    '<div class="card" style="border:2px solid #b3261e"><h2>⚠️ Stock getting low</h2><p class="muted small">About 3 weeks or less left, from recent sales and the shop orders and weddings already booked.</p>' + ((d.low || []).length ? '<table class="t"><tr><th>Flavour</th><th>Big tubs</th><th>Small tubs</th><th>Weeks left – small / big</th></tr>' + d.low.map(function (f) { return '<tr><td><b>' + esc(f.flavour) + '</b></td><td>' + (f.large == null ? '–' : f.large) + '</td><td>' + (f.small == null ? '–' : f.small) + '</td><td>' + wk(f.weeksLeftS) + ' / ' + wk(f.weeksLeftL) + '</td></tr>'; }).join('') + '</table>' : '<p class="muted">Nothing running low.</p>') + '</div>' +
+    '<div class="card"><h2>Running lowest</h2>' + ((d.lowest || []).length ? '<table class="t"><tr><th>Flavour</th><th>Small tubs – weeks left</th><th>Big tubs – weeks left</th></tr>' + d.lowest.map(function (f) { return '<tr><td>' + esc(f.flavour) + '</td><td>' + wk(f.weeksLeftS) + '</td><td>' + wk(f.weeksLeftL) + '</td></tr>'; }).join('') + '</table>' : '<p class="muted">Needs a few weeks of stock takes.</p>') + '</div>' +
+    '<div class="card"><h2>Weddings coming up</h2>' + ((d.weddings || []).map(function (w) { return '<div class="row"><span><b>' + esc(nice(w.date)) + '</b> · ' + esc(w.name) + '<br><span class="muted">' + esc(w.flavours.join(', ') || 'Flavours not chosen yet') + '</span></span><span>' + w.guests + ' guests</span></div>'; }).join('') || '<p class="muted">None in the next few weeks.</p>') + '</div>' +
+    '<div class="card"><h2>To order</h2>' + (((d.ingredients || []).length || (d.toOrder || []).length) ? '<ul style="margin:0 0 0 18px">' + (d.ingredients || []).map(function (i) { return '<li>' + esc(i.name) + (i.supplier ? ' <span class="muted small">(' + esc(i.supplier) + ')</span>' : '') + '</li>'; }).join('') + (d.toOrder || []).map(function (o) { return '<li>' + esc(o.item) + ' <span class="muted small">(asked by ' + esc(String(o.by || '').split(' ')[0]) + ')</span></li>'; }).join('') + '</ul>' : '<p class="muted">Nothing to order.</p>') + '</div>');
+}
+function orderMail(items, supplier, email) {
+  var body = 'Hi' + (supplier ? ' ' + supplier : '') + ',\n\nCould we please order:\n' + items.map(function (i) { return '- ' + i + ': ___'; }).join('\n') + '\n\nThanks,\nJonny Campbell\nDukes Ultra Premium Ice Cream';
+  return 'mailto:' + encodeURIComponent(email || '') + '?subject=' + encodeURIComponent('Order – Dukes Ice Cream') + '&body=' + encodeURIComponent(body);
+}
 function drawOffice(data, mine) {
+  if (!mine) return drawPaulOffice(data || {});
   var I = (data && data.insights) || {};
   var wk = function (x) { return x == null ? '<span class="muted">no count yet</span>' : x + ' wks'; };
   var short_ = (I.flavours || []).filter(function (f) { return f.shortfall > 0; });
@@ -1105,7 +1219,8 @@ function drawOffice(data, mine) {
     }).join('') + '</table></div></div>' +
     (mine ? '<div class="card"><h2>Best sellers</h2>' + ((I.bestSellers || []).map(function (b, i) { return '<div class="row"><span>' + (i + 1) + '. ' + esc(b.flavour) + '</span><b>' + b.weeklyLitres + ' L/week</b></div>'; }).join('') || '<p class="muted">Builds up as stock takes and orders are recorded.</p>') + '</div>' : '') +
     '<div class="card"><h2>Ingredients – when to order</h2><p class="muted small">From the last count, plus deliveries, minus what batches used. Flagged when it will run out within its lead time (+1 week).</p><div class="scroll"><table class="t"><tr><th>Ingredient</th><th>In stock (est.)</th><th>Use per week</th><th>Weeks left</th><th>Lead time</th><th>Supplier</th></tr>' +
-    (I.ingredients || []).map(function (g) { return '<tr><td>' + esc(g.name) + '</td><td>' + (g.est == null ? '<span class="muted">not counted</span>' : g.est + ' ' + esc(g.unit)) + '</td><td>' + (g.weeklyUse || '–') + '</td><td>' + (g.warn ? '<span class="pill bad">' + g.weeksLeft + ' – order now</span>' : (g.weeksLeft == null ? '–' : g.weeksLeft)) + '</td><td>' + g.lead + ' wks</td><td>' + esc(g.supplier || '?') + '</td></tr>'; }).join('') + '</table></div></div>' +
+    (I.ingredients || []).map(function (g) { var em = ((D().ingredients || []).find(function (x) { return x.name === g.name; }) || {}).supplierEmail; return '<tr><td>' + esc(g.name) + '</td><td>' + (g.est == null ? '<span class="muted">not counted</span>' : g.est + ' ' + esc(g.unit)) + '</td><td>' + (g.weeklyUse || '–') + '</td><td>' + (g.warn ? '<span class="pill bad">' + g.weeksLeft + ' – order now</span>' : (g.weeksLeft == null ? '–' : g.weeksLeft)) + '</td><td>' + g.lead + ' wks</td><td>' + esc(g.supplier || '?') + (g.warn ? ' <a class="btn soft sm" href="' + esc(orderMail([g.name], g.supplier, em)) + '">✉️ Draft order</a>' : '') + '</td></tr>'; }).join('') + '</table></div><p class="muted small">"Draft order" opens an email in your mail app for you to check and send. Add supplier email addresses in the Supplier email column on the Ingredients tab.</p></div>' +
+    ((D().toOrder || []).length ? '<div class="card"><h2>🛒 Asked to be ordered</h2>' + D().toOrder.map(function (o) { var g = (D().ingredients || []).find(function (x) { return x.name === o.item; }) || {}; return '<div class="row"><span><b>' + esc(o.item) + '</b><br><span class="muted small">asked by ' + esc(o.by || '') + ' · ' + esc(short(o.date)) + (g.supplier ? ' · ' + esc(g.supplier) : '') + '</span></span><span><a class="btn soft sm" href="' + esc(orderMail([o.item], g.supplier, g.supplierEmail)) + '">✉️ Draft order</a> <button class="btn sm" data-ordered="' + esc(o.id || '') + '">Ordered ✓</button></span></div>'; }).join('') + '</div>' : '') +
     '<div class="card"><h2>Weddings coming up</h2>' + ((I.weddings || []).map(function (w) { return '<div class="row"><span><b>' + esc(nice(w.date)) + '</b> · ' + esc(w.name) + '<br><span class="muted">' + esc(w.flavours.join(', ') || 'Flavours not chosen yet') + '</span></span><span>' + w.guests + ' guests</span></div>'; }).join('') || '<p class="muted">None booked in the next few weeks.</p>') + '</div>' +
     '<div class="card"><h2>Shop orders expected</h2>' + ((I.shops || []).map(function (s) { return '<div class="row"><span><b>' + esc(s.shop) + '</b><br><span class="muted">' + s.orders + ' orders · usually ' + s.small + ' small / ' + s.large + ' large' + (s.avgDays ? ' · every ' + s.avgDays + ' days' : '') + '</span></span><span>' + (s.nextDue ? 'about ' + esc(short(s.nextDue)) : '–') + '</span></div>'; }).join('') || '<p class="muted">Builds up once shops order through their links.</p>') + '</div>');
 }
@@ -1160,7 +1275,7 @@ ROUTES.packaging = function () {
   $$('#app input').forEach(function (e) { if (!e.closest('#g_new')) e.addEventListener('input', totals); });
   totals();
   $('#g_save').onclick = function () {
-    if (!val('g_by')) return toast('Who counted?');
+    if (!val('g_by')) $('#g_by').value = S.user;
     var counts = [];
     $$('[data-grp]').forEach(function (card) {
       var pb = numv(card.querySelector('[data-pb]'));
