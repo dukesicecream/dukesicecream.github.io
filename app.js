@@ -168,6 +168,7 @@ function route() {
   if (!S.key) return render(setupScreen());
   if (!S.data) { render('<div class="card center"><h2>Getting things ready…</h2><p class="muted">This device needs the internet once to download the lists. After that it works without.</p></div>'); return; }
   var parts = (location.hash || '#home').slice(1).split('/');
+  if (parts[0] !== 'hours') { S.hcode = null; S.hv = null; }
   if (!S.user && parts[0] !== 'who') { location.hash = 'who'; return; }
   var fn = ROUTES[parts[0]] || ROUTES.home;
   if (parts[0] === 'office' && !office()) fn = ROUTES.home;
@@ -194,13 +195,14 @@ ROUTES.home = function () {
     ['deliveries', '🚚', 'Deliveries in', 'Goods received'],
     ['temps', '🌡️', 'Temperatures', 'Type up the paper sheet'],
     ['cleaning', '🧽', 'Cleaning', 'Daily · weekly · monthly'],
-    ['stock', '📦', 'Ice cream stock', 'Weekly count'],
+    ['stock', '📦', 'Ice cream stock', 'Every Saturday'],
     ['ingstock', '🥄', 'Ingredient stock', 'Count dry goods'],
     ['packing', '🧾', 'Shop orders', 'Pack & record batches'],
     ['pest', '🐭', 'Pest control', 'Monthly check'],
     ['messages', '✉️', 'Messages', 'Notes & reminders'],
     ['recipes', '📖', 'Recipes', 'Base mix & flavours'],
-    ['records', '🖨️', 'Records', 'View & print']
+    ['records', '🖨️', 'Records', 'View & print'],
+    ['hours', '🔒', 'Hours & pay', 'Passcode needed']
   ];
   if (office()) tiles.unshift(['office', '📊', 'Office', 'Stock, orders & cream', true]);
   var unsent = S.queue.length;
@@ -219,9 +221,11 @@ function lotsFor(name) {
   return (D().lots || []).filter(function (l) { return l.status !== 'Finished' && String(l.item || '').toLowerCase() === n; })
     .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
 }
+function usesBase(f) { var i = (D().flavourInfo || []).find(function (x) { return x.name === f; }); return !i || i.base; }
 function recipeLines(flavour, mix) {
   var base = setN('Base mix litres', 58), f = mix ? Number(mix) / base : 0;
-  return (D().recipe || []).filter(function (r) { return r.flavour === 'All flavours (base mix)' || r.flavour === flavour; }).map(function (r) {
+  var wb = usesBase(flavour);
+  return (D().recipe || []).filter(function (r) { return (wb && r.flavour === 'All flavours (base mix)') || r.flavour === flavour; }).map(function (r) {
     var lot = lotsFor(r.ingredient)[0];
     return { ingredient: r.ingredient, qty: f ? r2(r.amount * f, 3) : '', unit: r.unit, batch: lot ? lot.batch : '', useBy: lot ? lot.useBy : '' };
   });
@@ -260,10 +264,10 @@ ROUTES.batch = function (no) {
     '<div class="scroll"><table class="t" id="b_lines"></table></div><button class="btn soft sm" id="b_add" type="button">+ Add ingredient</button> <button class="btn soft sm" id="b_recalc" type="button">Recalculate from recipe</button></div>' +
     '<div class="card"><h2>Pasteurisation</h2><div class="grid3">' +
     field('Start time', inp('b_start', x.start, 'time')) +
-    field('Temperature reached (°C)', inp('b_temp', x.temp, 'number')) +
-    field('Held for (minutes)', inp('b_hold', x.hold, 'number')) +
-    field('Cooling time (minutes)', inp('b_cool', x.cool, 'number')) +
-    field('End temperature (°C)', inp('b_end', x.end, 'number')) +
+    field('Temperature reached °C (at least ' + setN('Pasteurisation minimum °C', 65) + ')', inp('b_temp', x.temp, 'number')) +
+    field('Held for, minutes (at least ' + setN('Pasteurisation minimum hold (mins)', 30) + ')', inp('b_hold', x.hold, 'number')) +
+    field('Cooling time, minutes (' + setN('Cooling maximum (mins)', 60) + ' or less)', inp('b_cool', x.cool, 'number')) +
+    field('End temperature °C (' + setN('Cooled end temp maximum °C', 5) + ' or less)', inp('b_end', x.end, 'number')) +
     field('Pasteurised by', staffSel('b_pby', x.pby)) + '</div>' +
     '<div id="b_check"></div>' +
     field('Best before (1 year less a day)', inp('b_bb', x.bb || bestBefore(x.date), 'date')) + '</div>' +
@@ -304,14 +308,17 @@ ROUTES.batch = function (no) {
   }
   function check() {
     var t = num(val('b_temp')), h = num(val('b_hold')), c = num(val('b_cool')), e = num(val('b_end')), p = [];
-    if (t === '') return void ($('#b_check').innerHTML = '');
+    ['b_temp', 'b_hold', 'b_cool', 'b_end'].forEach(function (id) { var el = $('#' + id); el.style.background = ''; el.style.borderColor = ''; });
+    function hl(id) { var el = $('#' + id); el.style.background = '#fdecea'; el.style.borderColor = '#b3261e'; }
+    if (t === '') { $('#b_check').innerHTML = ''; return []; }
     var minT = setN('Pasteurisation minimum °C', 65), minH = setN('Pasteurisation minimum hold (mins)', 30), maxE = setN('Cooled end temp maximum °C', 5), maxC = setN('Cooling maximum (mins)', 60);
-    if (t < minT) p.push('temperature must reach at least ' + minT + ' °C');
-    if (h !== '' && h < minH) p.push('hold for at least ' + minH + ' minutes');
-    if (e !== '' && e > maxE) p.push('cool to ' + maxE + ' °C or below');
-    if (c !== '' && c > maxC) p.push('cooling should take no more than ' + maxC + ' minutes');
+    if (t < minT) { p.push('Temperature reached ' + t + ' °C – the limit is at least ' + minT + ' °C'); hl('b_temp'); }
+    if (h !== '' && h < minH) { p.push('Held for ' + h + ' minutes – the limit is at least ' + minH + ' minutes'); hl('b_hold'); }
+    if (e !== '' && e > maxE) { p.push('End temperature ' + e + ' °C – the limit is ' + maxE + ' °C or less'); hl('b_end'); }
+    if (c !== '' && c > maxC) { p.push('Cooling took ' + c + ' minutes – the limit is ' + maxC + ' minutes or less'); hl('b_cool'); }
     $('#b_check').innerHTML = p.length ? '<div class="check bad">⚠ Check: ' + esc(p.join('; ')) + '. Note what was done in Comments – Jonny will be told.</div>'
       : '<div class="check ok">✓ Within limits (' + minT + ' °C for ' + minH + ' min, cooled to ' + maxE + ' °C within ' + maxC + ' min)</div>';
+    return p;
   }
   function gather() {
     return { no: val('b_no'), flavour: val('b_flavour'), date: val('b_date'), mix: num(val('b_mix')), start: val('b_start'), temp: num(val('b_temp')), hold: num(val('b_hold')), cool: num(val('b_cool')), end: num(val('b_end')),
@@ -344,6 +351,8 @@ ROUTES.batch = function (no) {
     if (!g.no) return toast('Enter the batch number');
     if (isNew && (D().batches || []).some(function (z) { return String(z.no) === g.no; }) && !confirm('Batch ' + g.no + ' already exists. Save over it?')) return;
     if ((g.large !== '' || g.small !== '') && !g.tub) g.tub = today();
+    var probs = check();
+    if (probs.length && !confirm('Pasteurisation is outside the limits:\n\n• ' + probs.join('\n• ') + '\n\nIs this correct? Press OK to save it as it is, or Cancel to go back and fix a typing mistake.')) return;
     if (g.tub && !g.label && !confirm('Labels not ticked as checked. Save anyway?')) return;
     record('batch', g, 'Batch ' + g.no + ' saved');
     dropDraft('batch:' + no);
@@ -549,13 +558,13 @@ ROUTES.ingstock = function () {
     }).join('') +
     '<div class="card"><h2>Something not on the list?</h2><table class="t" id="i_new"></table><button class="btn soft sm" id="i_addrow" type="button">+ Add another</button></div>' +
     '<div class="bar"><button class="btn" id="i_save">Save count</button></div>');
-  function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Ingredient name" data-k="name"></td><td style="width:140px"><input placeholder="Quantity" inputmode="decimal" data-k="qty"></td><td style="width:100px"><input placeholder="Unit" data-k="unit" list="dl_units2"></td>'; $('#i_new').appendChild(tr); }
-  $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_units2"><option value="kg"><option value="g"><option value="L"><option value="tubs"><option value="units"><option value="boxes"></datalist>');
+  function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Ingredient name" data-k="name"></td><td style="width:140px"><input placeholder="Quantity" inputmode="decimal" data-k="qty"></td><td style="width:100px"><input placeholder="Unit" data-k="unit" list="dl_units2"></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); }
+  $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist><datalist id="dl_units2"><option value="kg"><option value="g"><option value="L"><option value="tubs"><option value="units"><option value="boxes"></datalist>');
   addRow(); $('#i_addrow').onclick = addRow;
   $('#i_save').onclick = function () {
     if (!val('i_by')) return toast('Who counted?');
     var counts = $$('tr[data-ing]').map(function (tr) { return { ingredient: tr.dataset.ing, unit: tr.dataset.unit, qty: num(tr.querySelector('input').value) }; }).filter(function (c) { return c.qty !== ''; });
-    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) counts.push({ ingredient: n, unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) === '' ? 0 : num(tr.querySelector('[data-k=qty]').value) }); });
+    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) counts.push({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) === '' ? 0 : num(tr.querySelector('[data-k=qty]').value) }); });
     if (!counts.length) return toast('Nothing counted yet');
     record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by'), counts: counts }, 'Ingredient count saved');
     location.hash = 'home';
@@ -634,13 +643,18 @@ ROUTES.messages = function () {
 
 /* ---------- recipes ---------- */
 ROUTES.recipes = function (f) {
-  var BASE = 'All flavours (base mix)', flavours = [BASE].concat(D().flavours || []);
+  var BASE = 'All flavours (base mix)', info = D().flavourInfo || [];
+  var ltd = info.filter(function (x) { return /limited/i.test(x.type); }).map(function (x) { return x.name; });
+  var flavours = [BASE].concat((D().flavours || []).filter(function (x) { return ltd.indexOf(x) < 0; }));
   f = f || BASE;
+  var wb = f === BASE || usesBase(f);
   var lines = (D().recipe || []).filter(function (r) { return r.flavour === f; }).map(function (r) { return Object.assign({}, r); });
   if (!lines.length) lines.push({ ingredient: '', amount: '', unit: 'kg' });
   var base = setN('Base mix litres', 58);
-  render(back() + '<h1>Recipes</h1><div class="card noprint">' + flavours.map(function (x) { return '<a class="chip' + (x === f ? ' on' : '') + '" href="#recipes/' + encodeURIComponent(x) + '">' + esc(x === BASE ? 'Base mix' : x) + '</a>'; }).join('') + '</div>' +
-    '<div class="card"><h2>' + esc(f) + '</h2><p class="muted">Amounts per ' + base + ' L of mix.' + (f === BASE ? ' Every flavour uses the base mix, plus its own extras.' : ' These are added on top of the base mix.') + '</p>' +
+  var chip = function (x) { return '<a class="chip' + (x === f ? ' on' : '') + '" href="#recipes/' + encodeURIComponent(x) + '">' + esc(x === BASE ? 'Base mix' : x) + '</a>'; };
+  render(back() + '<h1>Recipes</h1><div class="card noprint">' + flavours.map(chip).join('') +
+    '<h3>Limited Edition</h3>' + (ltd.map(chip).join('') || '<span class="muted small">None saved yet. </span>') + '<a class="chip" href="#" id="r_newltd">+ New limited edition</a></div>' +
+    '<div class="card"><h2>' + esc(f) + (ltd.indexOf(f) >= 0 ? ' <span class="pill">Limited Edition</span>' : '') + '</h2><p class="muted">Amounts per ' + base + ' L of mix.' + (f === BASE ? ' Every flavour uses the base mix, plus its own extras (except non-dairy flavours like sorbet).' : wb ? ' These are added on top of the base mix.' : ' <b>This flavour doesn\'t use the dairy base mix</b> – list everything that goes in.') + '</p>' +
     '<table class="t" id="r_t"></table><button class="btn soft sm noprint" id="r_add" type="button">+ Add ingredient</button></div>' +
     '<div class="card noprint"><h2>Scale it</h2>' + field('Litres of mix', inp('r_l', base, 'number')) + '<div id="r_scaled"></div></div>' +
     '<div class="bar"><button class="btn alt" onclick="window.print()">Print</button><button class="btn" id="r_save">Save recipe</button></div>');
@@ -654,10 +668,11 @@ ROUTES.recipes = function (f) {
   }
   function scale() {
     var L = Number(val('r_l')) || base, k = L / base;
-    var all = f === BASE ? lines : (D().recipe || []).filter(function (r) { return r.flavour === BASE; }).concat(lines);
+    var all = f === BASE || !wb ? lines : (D().recipe || []).filter(function (r) { return r.flavour === BASE; }).concat(lines);
     $('#r_scaled').innerHTML = '<table class="t">' + all.filter(function (l) { return l.ingredient; }).map(function (l) { return '<tr><td>' + esc(l.ingredient) + '</td><td><b>' + r2(Number(l.amount) * k, 3) + '</b> ' + esc(l.unit) + '</td></tr>'; }).join('') + '</table>';
   }
   draw(); $('#r_l').oninput = scale;
+  $('#r_newltd').onclick = function (ev) { ev.preventDefault(); var n = (prompt('Name of the new limited edition flavour') || '').trim(); if (n) location.hash = 'recipes/' + encodeURIComponent(n); };
   $('#r_add').onclick = function () { lines.push({ ingredient: '', amount: '', unit: 'kg' }); draw(); };
   $('#r_save').onclick = function () {
     if (f === BASE && !confirm('Change the base mix for every flavour?')) return;
@@ -732,5 +747,83 @@ ROUTES.office = function () {
     '<div class="card"><h2>Weddings coming up</h2>' + ((I.weddings || []).map(function (w) { return '<div class="row"><span><b>' + esc(nice(w.date)) + '</b> · ' + esc(w.name) + '<br><span class="muted">' + esc(w.flavours.join(', ') || 'Flavours not chosen yet') + '</span></span><span>' + w.guests + ' guests</span></div>'; }).join('') || '<p class="muted">None booked in the next few weeks.</p>') + '</div>' +
     '<div class="card"><h2>Shop orders expected</h2>' + ((I.shops || []).map(function (s) { return '<div class="row"><span><b>' + esc(s.shop) + '</b><br><span class="muted">' + s.orders + ' orders · usually ' + s.small + ' small / ' + s.large + ' large' + (s.avgDays ? ' · every ' + s.avgDays + ' days' : '') + '</span></span><span>' + (s.nextDue ? 'about ' + esc(short(s.nextDue)) : '–') + '</span></div>'; }).join('') || '<p class="muted">Builds up once shops order through their links.</p>') + '</div>');
 };
+
+/* ---------- staff hours & pay (passcode; never stored on the device) ---------- */
+function hoursCall(body) {
+  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'hours', k: S.key, code: S.hcode }, body)) }).then(function (r) { return r.json(); });
+}
+function hoursLockTimer() { clearTimeout(S.hTimer); S.hTimer = setTimeout(function () { S.hcode = null; S.hv = null; if ((location.hash || '').indexOf('#hours') === 0) { toast('Hours locked'); route(); } }, 10 * 60 * 1000); }
+ROUTES.hours = function (month) {
+  if (!S.hcode || !S.hv) {
+    render(back() + '<div class="card center" style="max-width:420px;margin:30px auto"><h1>🔒 Hours & pay</h1><p class="muted">Enter your passcode.</p>' +
+      '<input id="h_code" type="password" inputmode="numeric" autocomplete="off" style="text-align:center;font-size:26px;letter-spacing:8px;width:200px"><br>' +
+      '<button class="btn" id="h_go" style="margin-top:14px">Open</button><p class="muted small">Needs the internet. It locks again when you leave this screen.</p></div>');
+    var go = function () {
+      if (!navigator.onLine) return toast('Hours needs the internet');
+      S.hcode = val('h_code');
+      $('#h_go').disabled = true;
+      hoursCall({ op: 'get', month: month }).then(function (r) {
+        if (!r.ok) { S.hcode = null; $('#h_go').disabled = false; $('#h_code').value = ''; return toast(r.error || 'Wrong passcode'); }
+        S.hv = r; hoursLockTimer(); drawHours();
+      }).catch(function () { S.hcode = null; $('#h_go').disabled = false; toast('No connection'); });
+    };
+    $('#h_go').onclick = go; $('#h_code').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+    setTimeout(function () { $('#h_code').focus(); }, 50);
+    return;
+  }
+  if (month && month !== S.hv.month) return hoursDo({ op: 'get', month: month });
+  drawHours();
+};
+function hoursDo(body, msg) {
+  if (!navigator.onLine) return toast('Hours needs the internet');
+  hoursLockTimer();
+  return hoursCall(Object.assign({ month: S.hv ? S.hv.month : '' }, body)).then(function (r) {
+    if (!r.ok) { toast(r.error || 'Could not save'); if (/passcode/i.test(r.error || '')) { S.hcode = null; route(); } return; }
+    S.hv = r; if (msg) toast(msg); drawHours();
+  }).catch(function () { toast('No connection – not saved'); });
+}
+function drawHours() {
+  var v = S.hv, pay = v.level === 'pay';
+  var mDate = parse(v.month + '-01'), prev = new Date(mDate), next = new Date(mDate);
+  prev.setMonth(prev.getMonth() - 1); next.setMonth(next.getMonth() + 1);
+  var mk = function (d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); };
+  var monthName = mDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  var people = v.people.map(function (p) { return { v: p.name, t: p.name + (p.casual ? ' (casual)' : '') }; }).concat([{ v: '__new', t: '+ New casual worker…' }]);
+  var total = v.summary.reduce(function (a, x) { return a + (x.pay || 0); }, 0), totalH = v.summary.reduce(function (a, x) { return a + x.hours; }, 0);
+  render(back() + '<h1>' + (pay ? 'Hours & pay' : 'Staff hours') + '</h1>' +
+    '<div class="card noprint"><a class="btn soft sm" href="#hours/' + mk(prev) + '">‹ ' + esc(prev.toLocaleDateString('en-GB', { month: 'short' })) + '</a> <b style="margin:0 10px">' + esc(monthName) + '</b> <a class="btn soft sm" href="#hours/' + mk(next) + '">' + esc(next.toLocaleDateString('en-GB', { month: 'short' })) + ' ›</a>' +
+    ' <button class="btn alt sm" onclick="window.print()">Print</button> <button class="btn soft sm" id="h_lock">🔒 Lock</button></div>' +
+    '<div class="card noprint"><h2>Add hours</h2><div class="grid3">' +
+    field('Date', inp('h_date', today(), 'date')) + field('Who', sel('h_name', people, '', 'Choose…')) +
+    field('Start', inp('h_start', '', 'time')) + field('Finish', inp('h_fin', '', 'time')) + field('Break (minutes)', inp('h_brk', '', 'number')) +
+    field('…or total hours', inp('h_hrs', '', 'number')) + '</div>' + field('Notes', inp('h_notes', '')) +
+    '<p class="muted" id="h_calc"></p><button class="btn" id="h_add">Save hours</button></div>' +
+    '<div class="card"><h2>' + esc(monthName) + ' – totals</h2><div class="printonly">Dukes Ultra Premium Ice Cream</div><table class="t"><tr><th>Name</th><th>Hours</th>' + (pay ? '<th>Rate £/hr</th><th>Pay £</th>' : '') + '</tr>' +
+    (v.summary.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td><b>' + r2(x.hours) + '</b></td>' + (pay ? '<td><input class="h_rate" data-n="' + esc(x.name) + '" inputmode="decimal" value="' + esc(x.rate) + '" style="width:90px"></td><td><b>' + (x.pay == null ? '<span class="muted">set rate</span>' : '£' + x.pay.toFixed(2)) + '</b></td>' : '') + '</tr>'; }).join('') || '<tr><td colspan="4" class="muted">No hours this month yet.</td></tr>') +
+    (v.summary.length ? '<tr><td><b>Total</b></td><td><b>' + r2(totalH) + '</b></td>' + (pay ? '<td></td><td><b>£' + total.toFixed(2) + '</b></td>' : '') + '</tr>' : '') + '</table>' +
+    (pay ? '<p class="muted small">Pay is hours × rate, before tax, NI or holiday pay. Change a rate and press Enter – it\'s used for the whole month.</p>' : '') + '</div>' +
+    (pay ? '<div class="card noprint"><h2>Pay rates</h2><table class="t">' + v.rates.map(function (x) { return '<tr><td>' + esc(x.name) + (x.casual ? ' <span class="pill">casual</span>' : '') + '</td><td>£ <input class="h_rate" data-n="' + esc(x.name) + '" inputmode="decimal" value="' + esc(x.rate) + '" style="width:90px"> per hour</td></tr>'; }).join('') + '</table></div>' : '') +
+    '<div class="card"><h2>Entries</h2><table class="t"><tr><th>Date</th><th>Name</th><th>Times</th><th>Hours</th><th>Notes</th><th class="noprint"></th></tr>' +
+    (v.entries.map(function (e) { return '<tr><td>' + esc(short(e.date)) + '</td><td>' + esc(e.name) + (e.casual ? ' <span class="pill">casual</span>' : '') + '</td><td>' + esc(e.start && e.finish ? e.start + '–' + e.finish + (e.brk ? ' (' + e.brk + ' min break)' : '') : '') + '</td><td><b>' + r2(e.hours) + '</b></td><td>' + esc(e.notes || '') + '</td><td class="noprint"><button class="btn soft sm" data-del="' + esc(e.id) + '">✕</button></td></tr>'; }).join('') || '<tr><td colspan="6" class="muted">Nothing yet.</td></tr>') + '</table></div>');
+  $('#h_lock').onclick = function () { S.hcode = null; S.hv = null; location.hash = 'home'; };
+  var calc = function () { var a = val('h_start'), b = val('h_fin'); if (!a || !b) { $('#h_calc').textContent = ''; return; } var m = function (t) { var p = t.split(':'); return +p[0] * 60 + +p[1]; }; var mins = m(b) - m(a); if (mins < 0) mins += 1440; mins -= Number(val('h_brk')) || 0; $('#h_calc').textContent = '= ' + r2(mins / 60) + ' hours'; };
+  ['h_start', 'h_fin', 'h_brk'].forEach(function (id) { $('#' + id).oninput = calc; });
+  $('#h_name').onchange = function () {
+    var s = $('#h_name'); if (s.value !== '__new') return;
+    var n = (prompt('Name of the casual worker') || '').trim();
+    if (!n) { s.value = ''; return; }
+    var o = document.createElement('option'); o.value = n; o.textContent = n + ' (casual – new)'; o.dataset.casual = '1'; s.insertBefore(o, s.lastChild); s.value = n;
+    if (pay) { var r = prompt('Hourly rate for ' + n + ' in £ (leave empty to set later)') || ''; o.dataset.rate = r.trim(); }
+  };
+  $('#h_add').onclick = function () {
+    var opt = $('#h_name').selectedOptions[0], name = val('h_name');
+    if (!name || name === '__new') return toast('Choose who');
+    if (!(val('h_start') && val('h_fin')) && !num(val('h_hrs'))) return toast('Enter start and finish times, or the total hours');
+    var isCasual = (opt && opt.dataset.casual === '1') || v.people.some(function (p) { return p.name === name && p.casual; });
+    hoursDo({ op: 'save', e: { id: uid(), date: val('h_date'), name: name, start: val('h_start'), finish: val('h_fin'), brk: num(val('h_brk')), hours: num(val('h_hrs')), notes: val('h_notes'), casual: isCasual, rate: opt && opt.dataset.rate || '', by: S.user } }, 'Hours saved for ' + name);
+  };
+  $$('.h_rate').forEach(function (e) { e.onchange = function () { hoursDo({ op: 'rate', name: e.dataset.n, rate: num(e.value) }, 'Rate saved for ' + e.dataset.n); }; });
+  $$('[data-del]').forEach(function (b) { b.onclick = function () { if (confirm('Delete this entry?')) hoursDo({ op: 'delete', id: b.dataset.del }, 'Deleted'); }; });
+}
 
 boot();
