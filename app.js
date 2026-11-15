@@ -146,7 +146,8 @@ function applyLocal(op, data) {
     case 'ingStock': data.ingStock = (data.ingStock || []).filter(function (x) { return x.id.indexOf(d.id + ':') !== 0; }).concat(d.counts.filter(function (c) { return c.qty !== ''; }).map(function (c) { return { id: d.id + ':' + c.ingredient, date: d.date, ingredient: c.ingredient, qty: c.qty, unit: c.unit, by: d.by }; }));
       d.counts.forEach(function (c) { if (c.ingredient && !data.ingredients.some(function (i) { return i.name.toLowerCase() === c.ingredient.toLowerCase(); })) data.ingredients.push({ name: c.ingredient, unit: c.unit, track: true }); });
       break;
-    case 'recipe': data.recipe = (data.recipe || []).filter(function (x) { return x.flavour !== d.flavour; }).concat(d.lines.filter(function (l) { return l.ingredient; }).map(function (l) { return { flavour: d.flavour, ingredient: l.ingredient, amount: Number(l.amount) || 0, unit: l.unit }; })); break;
+    case 'recipe': if (d.notes != null) { var fi = (data.flavourInfo || []).find(function (x) { return x.name === d.flavour; }); if (fi) fi.notes = d.notes; else (data.flavourInfo = data.flavourInfo || []).push({ name: d.flavour, active: true, type: 'Limited Edition', base: true, notes: d.notes }); }
+      data.recipe = (data.recipe || []).filter(function (x) { return x.flavour !== d.flavour; }).concat(d.lines.filter(function (l) { return l.ingredient; }).map(function (l) { return { flavour: d.flavour, ingredient: l.ingredient, amount: Number(l.amount) || 0, unit: l.unit }; })); break;
     case 'pack': (data.orders || []).forEach(function (o) { if (String(o.no) === String(d.no)) { o.lines = d.lines; o.status = d.done ? 'Packed' : 'Packing'; o.packedBy = d.by; if (d.done) o.packedAt = today(); } }); break;
     case 'message': data.messages = data.messages || []; upsertBy(data.messages, 'id', { id: d.id, date: today(), from: d.from, to: d.to, text: d.text, remind: d.remind, sent: false }); break;
     case 'delete': {
@@ -655,7 +656,8 @@ ROUTES.recipes = function (f) {
   render(back() + '<h1>Recipes</h1><div class="card noprint">' + flavours.map(chip).join('') +
     '<h3>Limited Edition</h3>' + (ltd.map(chip).join('') || '<span class="muted small">None saved yet. </span>') + '<a class="chip" href="#" id="r_newltd">+ New limited edition</a></div>' +
     '<div class="card"><h2>' + esc(f) + (ltd.indexOf(f) >= 0 ? ' <span class="pill">Limited Edition</span>' : '') + '</h2><p class="muted">Amounts per ' + base + ' L of mix.' + (f === BASE ? ' Every flavour uses the base mix, plus its own extras (except non-dairy flavours like sorbet).' : wb ? ' These are added on top of the base mix.' : ' <b>This flavour doesn\'t use the dairy base mix</b> – list everything that goes in.') + '</p>' +
-    '<table class="t" id="r_t"></table><button class="btn soft sm noprint" id="r_add" type="button">+ Add ingredient</button></div>' +
+    '<table class="t" id="r_t"></table><button class="btn soft sm noprint" id="r_add" type="button">+ Add ingredient</button>' +
+    (f === BASE ? '' : field('Notes / method', '<textarea id="r_notes" rows="4">' + esc(((info.find(function (x) { return x.name === f; }) || {}).notes) || '') + '</textarea>')) + '</div>' +
     '<div class="card noprint"><h2>Scale it</h2>' + field('Litres of mix', inp('r_l', base, 'number')) + '<div id="r_scaled"></div></div>' +
     '<div class="bar"><button class="btn alt" onclick="window.print()">Print</button><button class="btn" id="r_save">Save recipe</button></div>');
   function draw() {
@@ -676,7 +678,7 @@ ROUTES.recipes = function (f) {
   $('#r_add').onclick = function () { lines.push({ ingredient: '', amount: '', unit: 'kg' }); draw(); };
   $('#r_save').onclick = function () {
     if (f === BASE && !confirm('Change the base mix for every flavour?')) return;
-    record('recipe', { flavour: f, lines: lines.filter(function (l) { return l.ingredient; }) }, 'Recipe saved');
+    record('recipe', { flavour: f, lines: lines.filter(function (l) { return l.ingredient; }), notes: f === BASE ? null : val('r_notes') }, 'Recipe saved');
     route();
   };
 };
@@ -752,7 +754,11 @@ ROUTES.office = function () {
 function hoursCall(body) {
   return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'hours', k: S.key, code: S.hcode }, body)) }).then(function (r) { return r.json(); });
 }
-function hoursLockTimer() { clearTimeout(S.hTimer); S.hTimer = setTimeout(function () { S.hcode = null; S.hv = null; if ((location.hash || '').indexOf('#hours') === 0) { toast('Hours locked'); route(); } }, 10 * 60 * 1000); }
+function hoursLockTimer() {
+  clearTimeout(S.hTimer);
+  S.hTimer = setTimeout(function () { S.hcode = null; S.hv = null; if ((location.hash || '').indexOf('#hours') === 0) { location.hash = 'home'; toast('Hours & pay closed after 3 minutes without use'); } }, 3 * 60 * 1000);
+  if (!S.hWatch) { S.hWatch = true; ['click', 'keydown', 'input', 'touchstart', 'scroll'].forEach(function (ev) { document.addEventListener(ev, function () { if (S.hcode && (location.hash || '').indexOf('#hours') === 0) hoursLockTimer(); }, true); }); }
+}
 ROUTES.hours = function (month) {
   if (!S.hcode || !S.hv) {
     render(back() + '<div class="card center" style="max-width:420px;margin:30px auto"><h1>🔒 Hours & pay</h1><p class="muted">Enter your passcode.</p>' +
@@ -761,8 +767,9 @@ ROUTES.hours = function (month) {
     var go = function () {
       if (!navigator.onLine) return toast('Hours needs the internet');
       S.hcode = val('h_code');
+      if (!S.hcode) return toast('Enter the passcode');
       $('#h_go').disabled = true;
-      hoursCall({ op: 'get', month: month }).then(function (r) {
+      hoursCall({ op: 'get', month: month, by: S.user }).then(function (r) {
         if (!r.ok) { S.hcode = null; $('#h_go').disabled = false; $('#h_code').value = ''; return toast(r.error || 'Wrong passcode'); }
         S.hv = r; hoursLockTimer(); drawHours();
       }).catch(function () { S.hcode = null; $('#h_go').disabled = false; toast('No connection'); });
@@ -797,14 +804,18 @@ function drawHours() {
     field('Date', inp('h_date', today(), 'date')) + field('Who', sel('h_name', people, '', 'Choose…')) +
     field('Start', inp('h_start', '', 'time')) + field('Finish', inp('h_fin', '', 'time')) + field('Break (minutes)', inp('h_brk', '', 'number')) +
     field('…or total hours', inp('h_hrs', '', 'number')) + '</div>' + field('Notes', inp('h_notes', '')) +
-    '<p class="muted" id="h_calc"></p><button class="btn" id="h_add">Save hours</button></div>' +
+    '<p class="muted" id="h_calc"></p><button class="btn" id="h_add">Save hours</button> <button class="btn alt" id="h_cancel" style="display:none">Cancel edit</button></div>' +
+    (function () { var fl = v.entries.filter(function (e) { return e.flags && e.flags.length; }); return fl.length ? '<div class="due bad"><span>⚠</span><span><b>' + fl.length + ' entr' + (fl.length > 1 ? 'ies' : 'y') + ' to check</b> this month – marked in red below.</span></div>' : ''; })() +
     '<div class="card"><h2>' + esc(monthName) + ' – totals</h2><div class="printonly">Dukes Ultra Premium Ice Cream</div><table class="t"><tr><th>Name</th><th>Hours</th>' + (pay ? '<th>Rate £/hr</th><th>Pay £</th>' : '') + '</tr>' +
-    (v.summary.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td><b>' + r2(x.hours) + '</b></td>' + (pay ? '<td><input class="h_rate" data-n="' + esc(x.name) + '" inputmode="decimal" value="' + esc(x.rate) + '" style="width:90px"></td><td><b>' + (x.pay == null ? '<span class="muted">set rate</span>' : '£' + x.pay.toFixed(2)) + '</b></td>' : '') + '</tr>'; }).join('') || '<tr><td colspan="4" class="muted">No hours this month yet.</td></tr>') +
+    (v.summary.map(function (x) { return '<tr><td>' + esc(x.name) + (x.flagged ? ' <span class="pill bad">⚠ ' + x.flagged + '</span>' : '') + '</td><td><b>' + r2(x.hours) + '</b></td>' + (pay ? '<td><input class="h_rate" data-n="' + esc(x.name) + '" inputmode="decimal" value="' + esc(x.rate) + '" style="width:90px"></td><td><b>' + (x.pay == null ? '<span class="muted">set rate</span>' : '£' + x.pay.toFixed(2)) + '</b></td>' : '') + '</tr>'; }).join('') || '<tr><td colspan="4" class="muted">No hours this month yet.</td></tr>') +
     (v.summary.length ? '<tr><td><b>Total</b></td><td><b>' + r2(totalH) + '</b></td>' + (pay ? '<td></td><td><b>£' + total.toFixed(2) + '</b></td>' : '') + '</tr>' : '') + '</table>' +
     (pay ? '<p class="muted small">Pay is hours × rate, before tax, NI or holiday pay. Change a rate and press Enter – it\'s used for the whole month.</p>' : '') + '</div>' +
     (pay ? '<div class="card noprint"><h2>Pay rates</h2><table class="t">' + v.rates.map(function (x) { return '<tr><td>' + esc(x.name) + (x.casual ? ' <span class="pill">casual</span>' : '') + '</td><td>£ <input class="h_rate" data-n="' + esc(x.name) + '" inputmode="decimal" value="' + esc(x.rate) + '" style="width:90px"> per hour</td></tr>'; }).join('') + '</table></div>' : '') +
     '<div class="card"><h2>Entries</h2><table class="t"><tr><th>Date</th><th>Name</th><th>Times</th><th>Hours</th><th>Notes</th><th class="noprint"></th></tr>' +
-    (v.entries.map(function (e) { return '<tr><td>' + esc(short(e.date)) + '</td><td>' + esc(e.name) + (e.casual ? ' <span class="pill">casual</span>' : '') + '</td><td>' + esc(e.start && e.finish ? e.start + '–' + e.finish + (e.brk ? ' (' + e.brk + ' min break)' : '') : '') + '</td><td><b>' + r2(e.hours) + '</b></td><td>' + esc(e.notes || '') + '</td><td class="noprint"><button class="btn soft sm" data-del="' + esc(e.id) + '">✕</button></td></tr>'; }).join('') || '<tr><td colspan="6" class="muted">Nothing yet.</td></tr>') + '</table></div>');
+    (v.entries.map(function (e) { var f = e.flags || []; return '<tr' + (f.length ? ' style="background:#fdecea"' : '') + '><td>' + esc(short(e.date)) + '</td><td>' + esc(e.name) + (e.casual ? ' <span class="pill">casual</span>' : '') + '</td><td>' + esc(e.start && e.finish ? e.start + '–' + e.finish + (e.brk ? ' (' + e.brk + ' min break)' : '') : '') + '</td><td><b>' + r2(e.hours) + '</b></td><td>' + esc(e.notes || '') +
+      (f.length ? '<br><span class="pill bad">⚠ ' + esc(f.join(' · ')) + '</span>' : '') + (e.log ? '<br><span class="muted small">' + esc(e.log).replace(/\n/g, '<br>') + '</span>' : '') + '<br><span class="muted small">Entered ' + esc(e.created || '') + (e.by ? ' by ' + esc(e.by) : '') + '</span></td>' +
+      '<td class="noprint"><button class="btn soft sm" data-edit="' + esc(e.id) + '">✎</button> <button class="btn soft sm" data-del="' + esc(e.id) + '">✕</button></td></tr>'; }).join('') || '<tr><td colspan="6" class="muted">Nothing yet.</td></tr>') + '</table></div>' +
+    (v.changes && v.changes.length ? '<div class="card"><h2>Changes this month</h2><table class="t"><tr><th>When</th><th>By</th><th></th><th>Before</th><th>After</th></tr>' + v.changes.map(function (c) { return '<tr><td>' + esc(c.when) + '</td><td>' + esc(c.by) + '</td><td>' + esc(c.what) + '</td><td>' + esc(c.before) + '</td><td>' + esc(c.after || '–') + '</td></tr>'; }).join('') + '</table></div>' : ''));
   $('#h_lock').onclick = function () { S.hcode = null; S.hv = null; location.hash = 'home'; };
   var calc = function () { var a = val('h_start'), b = val('h_fin'); if (!a || !b) { $('#h_calc').textContent = ''; return; } var m = function (t) { var p = t.split(':'); return +p[0] * 60 + +p[1]; }; var mins = m(b) - m(a); if (mins < 0) mins += 1440; mins -= Number(val('h_brk')) || 0; $('#h_calc').textContent = '= ' + r2(mins / 60) + ' hours'; };
   ['h_start', 'h_fin', 'h_brk'].forEach(function (id) { $('#' + id).oninput = calc; });
@@ -815,12 +826,21 @@ function drawHours() {
     var o = document.createElement('option'); o.value = n; o.textContent = n + ' (casual – new)'; o.dataset.casual = '1'; s.insertBefore(o, s.lastChild); s.value = n;
     if (pay) { var r = prompt('Hourly rate for ' + n + ' in £ (leave empty to set later)') || ''; o.dataset.rate = r.trim(); }
   };
+  S.hEdit = null;
+  $$('[data-edit]').forEach(function (b) { b.onclick = function () {
+    var e = v.entries.find(function (x) { return x.id === b.dataset.edit; }); if (!e) return;
+    S.hEdit = e.id;
+    var s = $('#h_name'); if (!Array.prototype.some.call(s.options, function (o) { return o.value === e.name; })) { var o = document.createElement('option'); o.value = e.name; o.textContent = e.name; s.insertBefore(o, s.lastChild); }
+    s.value = e.name; $('#h_date').value = e.date; $('#h_start').value = e.start; $('#h_fin').value = e.finish; $('#h_brk').value = e.brk || ''; $('#h_hrs').value = e.start && e.finish ? '' : e.hours; $('#h_notes').value = e.notes || '';
+    $('#h_add').textContent = 'Save changes'; $('#h_cancel').style.display = ''; calc(); window.scrollTo(0, 0); toast('Editing – changes are recorded');
+  }; });
+  $('#h_cancel').onclick = function () { drawHours(); };
   $('#h_add').onclick = function () {
     var opt = $('#h_name').selectedOptions[0], name = val('h_name');
     if (!name || name === '__new') return toast('Choose who');
     if (!(val('h_start') && val('h_fin')) && !num(val('h_hrs'))) return toast('Enter start and finish times, or the total hours');
     var isCasual = (opt && opt.dataset.casual === '1') || v.people.some(function (p) { return p.name === name && p.casual; });
-    hoursDo({ op: 'save', e: { id: uid(), date: val('h_date'), name: name, start: val('h_start'), finish: val('h_fin'), brk: num(val('h_brk')), hours: num(val('h_hrs')), notes: val('h_notes'), casual: isCasual, rate: opt && opt.dataset.rate || '', by: S.user } }, 'Hours saved for ' + name);
+    hoursDo({ op: 'save', e: { id: S.hEdit || uid(), date: val('h_date'), name: name, start: val('h_start'), finish: val('h_fin'), brk: num(val('h_brk')), hours: num(val('h_hrs')), notes: val('h_notes'), casual: isCasual, rate: opt && opt.dataset.rate || '', by: S.user } }, 'Hours saved for ' + name);
   };
   $$('.h_rate').forEach(function (e) { e.onchange = function () { hoursDo({ op: 'rate', name: e.dataset.n, rate: num(e.value) }, 'Rate saved for ' + e.dataset.n); }; });
   $$('[data-del]').forEach(function (b) { b.onclick = function () { if (confirm('Delete this entry?')) hoursDo({ op: 'delete', id: b.dataset.del }, 'Deleted'); }; });
