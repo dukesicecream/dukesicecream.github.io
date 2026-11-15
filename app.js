@@ -147,7 +147,7 @@ function applyLocal(op, data) {
     case 'ingStock': data.ingStock = (data.ingStock || []).filter(function (x) { return x.id.indexOf(d.id + ':') !== 0; }).concat(d.counts.filter(function (c) { return c.qty !== ''; }).map(function (c) { return { id: d.id + ':' + c.ingredient, date: d.date, ingredient: c.ingredient, qty: c.qty, unit: c.unit, by: d.by }; }));
       d.counts.forEach(function (c) { if (c.ingredient && !data.ingredients.some(function (i) { return i.name.toLowerCase() === c.ingredient.toLowerCase(); })) data.ingredients.push({ name: c.ingredient, unit: c.unit, track: true }); });
       break;
-    case 'packStock': data.packStock = data.packStock || {}; (d.counts || []).forEach(function (c) { data.packStock[c.item] = { date: d.date, qty: c.qty, rolls: c.rolls, perRoll: c.perRoll, by: d.by }; if (!(data.packItems || []).some(function (i) { return i.item === c.item; })) (data.packItems = data.packItems || []).push({ item: c.item, group: c.group, unit: c.unit, perRoll: c.perRoll }); }); break;
+    case 'packStock': data.packStock = data.packStock || {}; (d.counts || []).forEach(function (c) { data.packStock[c.item] = { date: d.date, qty: c.qty, rolls: c.rolls, perRoll: c.perRoll, boxes: c.boxes, perBox: c.perBox, by: d.by }; (data.packItems || []).forEach(function (i) { if (i.item === c.item && c.perBox) i.perBox = c.perBox; }); if (!(data.packItems || []).some(function (i) { return i.item === c.item; })) (data.packItems = data.packItems || []).push({ item: c.item, group: c.group, unit: c.unit, perRoll: c.perRoll }); }); break;
     case 'recipe': if (d.request) { (data.recipeRequests = data.recipeRequests || []).push({ id: op.id, date: today(), flavour: d.flavour, by: d.name, user: op.by, lines: d.lines, notes: d.notes, local: true }); break; }
       (data.flavourInfo || []).forEach(function (x) { if (x.name === d.flavour) { x.savedBy = d.name; x.savedOn = today(); } });
       if (d.notes != null) { var fi = (data.flavourInfo || []).find(function (x) { return x.name === d.flavour; }); if (fi) fi.notes = d.notes; else (data.flavourInfo = data.flavourInfo || []).push({ name: d.flavour, active: true, type: 'Limited Edition', base: true, notes: d.notes }); }
@@ -229,7 +229,7 @@ ROUTES.home = function () {
   var open = (D().batches || []).filter(function (b) { return b.status === 'Pasteurised'; });
   var mine = isOwner(), boss = mine || S.user === manager();
   var tiles = [];
-  if (boss) tiles.push(['office', '📊', 'Office', mine ? 'Sales, stock, orders & cream' : 'Stock & what to make', true]);
+  if (boss) tiles.push(['office', '📊', 'Office', mine ? 'Sales, stock, orders & cream' : 'Stock & what to make', true], ['weddings', '💍', 'Weddings', 'Tubs out & back']);
   tiles.push(['production', '🍦', 'Production', open.length ? open.length + ' batch' + (open.length > 1 ? 'es' : '') + ' to tub' : 'Batch records', !boss],
     ['recipes', '📖', 'Recipes', 'Base mix & flavours'],
     ['deliveries', '🚚', 'Deliveries in', 'Goods received'],
@@ -867,6 +867,7 @@ ROUTES.office = function () {
   var useLocal = mine && office() && D().insights;
   var go = function (data) { if ((location.hash || '').indexOf('#office') === 0) drawOffice(data, mine); };
   if (mine && S.own && Date.now() - S.ownAt < 90000) return go(S.own);
+  if (!mine && !mgrOK()) return mgrSignIn('office');
   if (S.user === manager() && S.mgr && Date.now() - S.mgrAt < 90000) return go(S.mgr);
   if (!navigator.onLine) {
     if (mine && (S.own || useLocal)) return go(S.own || { insights: D().insights });
@@ -875,9 +876,91 @@ ROUTES.office = function () {
   }
   render(back() + '<h1>Office</h1><p class="muted center">Loading…</p>');
   if (mine) loadOwn(true).then(function (x) { go(x || (useLocal ? { insights: D().insights } : { insights: {} })); });
-  else fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'office', k: S.key, by: S.user }) }).then(function (r) { return r.json(); })
-    .then(function (r) { if (!r.ok) { toast(r.error || 'Could not open'); location.hash = 'home'; return; } S.mgr = r; S.mgrAt = Date.now(); go(r); })
+  else mgrCall({}).then(function (r) { if (!r.ok) { if (r.needCode) { S.pcode = null; return route(); } toast(r.error || 'Could not open'); location.hash = 'home'; return; } S.mgr = r; S.mgrAt = Date.now(); go(r); })
     .catch(function () { render(back() + '<h1>Office</h1><div class="card">No connection.</div>'); });
+};
+// Paul's passcode opens Office and Weddings; it's kept only in memory and forgotten after 15 minutes without use
+function mgrOK() { if (S.pcode && Date.now() - (S.pcodeAt || 0) < 15 * 60000 && S.pcodeFor === S.user) { S.pcodeAt = Date.now(); return true; } S.pcode = null; return false; }
+function mgrCall(body) { return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'office', k: S.key, by: S.user, code: S.pcode }, body)) }).then(function (r) { return r.json(); }); }
+function mgrSignIn(next) {
+  render(back() + '<div class="card center" style="max-width:420px;margin:30px auto"><h1>🔒 ' + (next === 'weddings' ? 'Weddings' : 'Office') + '</h1><p class="muted">Enter your passcode.</p>' +
+    '<input id="m_code" type="password" inputmode="numeric" autocomplete="off" style="text-align:center;font-size:26px;letter-spacing:8px;width:200px"><br>' +
+    '<button class="btn" id="m_go" style="margin-top:14px">Open</button><p class="muted small">Needs the internet.</p></div>');
+  var go = function () {
+    var c = val('m_code'); if (!c) return toast('Enter the passcode');
+    if (!navigator.onLine) return toast('Needs the internet');
+    $('#m_go').disabled = true; S.pcode = c;
+    mgrCall({ op: 'check' }).then(function (r) {
+      if (!r.ok) { S.pcode = null; $('#m_go').disabled = false; $('#m_code').value = ''; return toast(r.error || 'Wrong passcode'); }
+      S.pcodeAt = Date.now(); S.pcodeFor = S.user; route();
+    }).catch(function () { S.pcode = null; $('#m_go').disabled = false; toast('No connection'); });
+  };
+  $('#m_go').onclick = go; $('#m_code').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+  setTimeout(function () { $('#m_code').focus(); }, 50);
+}
+
+/* ---------- weddings: tubs taken out and brought back (Jonny & Paul) ---------- */
+ROUTES.weddings = function (key) {
+  var mine = isOwner();
+  if (!mine && S.user !== manager()) return ROUTES.home();
+  if (!mine && !mgrOK()) return mgrSignIn('weddings');
+  var draw = function (v) {
+    if ((location.hash || '').indexOf('#weddings') !== 0) return;
+    v = v || { weddings: [], records: [] };
+    var recs = (v.records || []).concat((S.wQueue || []).filter(function (q) { return !(v.records || []).some(function (x) { return x.id === q.id; }); }));
+    var byKey = {}; recs.forEach(function (x) { if (x.key) byKey[x.key] = x; });
+    var opts = (v.weddings || []).map(function (w) { var done = byKey[w.key]; return { v: w.key, t: short(w.date) + ' – ' + w.name + ' (' + w.guests + ' guests)' + (done ? (done.sr !== '' && done.sr != null ? ' ✓' : ' · out') : '') }; });
+    var cur = key ? byKey[key] || null : null, w = key ? (v.weddings || []).find(function (x) { return x.key === key; }) : null;
+    var x = cur || { id: '', date: w ? w.date : today(), wedding: w ? w.name : '', guests: w ? w.guests : '', st: '', lt: '', sr: '', lr: '', notes: '', by: S.user };
+    var n = function (q) { return q === '' || q == null ? '' : q; };
+    render(back() + '<h1>Weddings</h1><p class="muted">Record how many tubs went out to a wedding, then how many came back. Flavours don\'t matter here.</p>' +
+      '<div class="card"><h2>' + (cur ? 'Update' : 'Record') + ' a wedding</h2>' +
+      field('Wedding', sel('w_pick', opts.concat([{ v: '__other', t: 'Other – type it in…' }]), key || '', navigator.onLine ? 'Choose the wedding…' : 'No internet – choose Other')) +
+      '<div class="grid2">' + field('Date', inp('w_date', x.date, 'date')) + field('Wedding / event name', inp('w_name', x.wedding)) + '</div>' +
+      '<div class="grid2"><div><h3>Taken out</h3><div class="grid2">' + field('Small tubs', inp('w_st', n(x.st), 'number')) + field('Large tubs', inp('w_lt', n(x.lt), 'number')) + '</div></div>' +
+      '<div><h3>Brought back</h3><div class="grid2">' + field('Small tubs', inp('w_sr', n(x.sr), 'number')) + field('Large tubs', inp('w_lr', n(x.lr), 'number')) + '</div></div></div>' +
+      '<div id="w_used" class="hint"></div>' +
+      '<div class="grid2">' + field('Recorded by', staffSel('w_by', x.by || S.user)) + field('Notes', inp('w_notes', x.notes || '')) + '</div>' +
+      '<button class="btn" id="w_save">Save</button> <span class="muted small">Save what went out now, and add what came back after.</span></div>' +
+      '<div class="card"><h2>Recent weddings</h2><div class="scroll"><table class="t"><tr><th>Date</th><th>Wedding</th><th>Taken</th><th>Back</th><th>Used</th><th></th></tr>' +
+      (recs.map(function (r) {
+        var t = function (s, l) { return s === '' || s == null ? '–' : s + ' S' + (l ? ' / ' + l + ' L' : ''); };
+        var used = r.st === '' || r.st == null ? '–' : (r.sr === '' || r.sr == null ? '<span class="pill warn">not back yet</span>' : t(Math.max(0, r.st - (r.sr || 0)), Math.max(0, (r.lt || 0) - (r.lr || 0))));
+        return '<tr><td>' + esc(short(r.date)) + '</td><td>' + esc(r.wedding) + '</td><td>' + t(r.st, r.lt) + '</td><td>' + t(r.sr, r.lr) + '</td><td>' + used + '</td><td>' + (r.key ? '<a class="btn soft sm" href="#weddings/' + encodeURIComponent(r.key) + '">Edit</a>' : '') + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>') + '</table></div></div>');
+    var usedTxt = function () {
+      var st = num(val('w_st')), lt = num(val('w_lt')), sr = num(val('w_sr')), lr = num(val('w_lr'));
+      $('#w_used').innerHTML = st === '' && lt === '' ? 'Fill in what went out.' : sr === '' && lr === '' ? 'Out now: <b>' + (st || 0) + ' small, ' + (lt || 0) + ' large</b>. Add what comes back after the wedding.' :
+        'Used at the wedding: <b>' + Math.max(0, (st || 0) - (sr || 0)) + ' small, ' + Math.max(0, (lt || 0) - (lr || 0)) + ' large</b>';
+    };
+    ['w_st', 'w_lt', 'w_sr', 'w_lr'].forEach(function (id) { $('#' + id).oninput = usedTxt; }); usedTxt();
+    $('#w_pick').onchange = function () {
+      var p = val('w_pick');
+      if (p === '__other') { $('#w_name').focus(); return; }
+      location.hash = p ? 'weddings/' + encodeURIComponent(p) : 'weddings';
+    };
+    $('#w_save').onclick = function () {
+      var name = val('w_name');
+      if (!name) return toast('Which wedding?');
+      if (!val('w_by')) return toast('Who is recording it?');
+      var st = num(val('w_st')), sr = num(val('w_sr')), lt = num(val('w_lt')), lr = num(val('w_lr'));
+      if (st === '' && lt === '') return toast('Fill in how many tubs went out');
+      if ((sr !== '' && sr > (st || 0)) || (lr !== '' && lr > (lt || 0))) { if (!confirm('More came back than went out. Is that right?')) return; }
+      var pk = val('w_pick'), bkey = pk && pk !== '__other' ? pk : (cur && cur.key) || (val('w_date') + '|' + name);
+      var d = { id: (cur && cur.id) || uid(), key: bkey, date: val('w_date'), wedding: name, guests: w ? w.guests : (cur ? cur.guests : ''), st: st, lt: lt, sr: sr, lr: lr, by: val('w_by'), notes: val('w_notes') };
+      record('weddingTubs', d, sr === '' && lr === '' ? 'Saved – tubs out' : 'Saved – tubs back');
+      S.wQueue = (S.wQueue || []).filter(function (q) { return q.id !== d.id; }).concat([d]);
+      S.wv = null; location.hash = 'weddings';
+      setTimeout(function () { route(); }, 4000);
+    };
+  };
+  if (S.wv && Date.now() - S.wvAt < 30000) return draw(S.wv);
+  if (!navigator.onLine) return draw(S.wv);
+  render(back() + '<h1>Weddings</h1><p class="muted center">Loading…</p>');
+  (mine ? ownerCall({ op: 'weddings' }) : mgrCall({ op: 'weddings' })).then(function (r) {
+    if (!r.ok) { if (r.needCode) { S.pcode = null; return route(); } toast(r.error || 'Could not open'); return draw(S.wv); }
+    S.wv = r; S.wvAt = Date.now(); draw(r);
+  }).catch(function () { draw(S.wv); });
 };
 function salesHtml(sales) {
   var ps = (sales && sales.periods) || [];
@@ -886,10 +969,10 @@ function salesHtml(sales) {
   var money = function (n) { return '£' + (Number(n) || 0).toFixed(2); };
   var rows = p.shops.map(function (s) { return '<tr><td>' + esc(s.shop) + ' <span class="muted small">(' + s.orders + ' order' + (s.orders > 1 ? 's' : '') + ')</span></td><td>' + s.S + '</td><td>' + s.L + '</td><td>' + money(s.value) + '</td></tr>'; }).join('');
   return '<div class="card"><h2>💷 Sales – ' + esc(short(p.from)) + ' to ' + esc(short(p.to)) + '</h2>' +
-    '<p class="muted small">From the stock takes: last count + tubs made (batch records) − this count = tubs gone. Shops are the orders packed, weddings are one small tub per guest, and the rest went through the farm shop. Only you see this.</p>' +
+    '<p class="muted small">From the stock takes: last count + tubs made (batch records) − this count = tubs gone. Shops are the orders packed, weddings are what Paul recorded as used (or one small tub per guest if nothing was recorded), and the rest went through the farm shop. Only you see this.</p>' +
     '<div class="scroll"><table class="t"><tr><th>Where</th><th>Small</th><th>Large</th><th>Value</th></tr>' + rows +
     '<tr><td><b>All shops</b></td><td><b>' + p.shopTotal.S + '</b></td><td><b>' + p.shopTotal.L + '</b></td><td><b>' + money(p.shopTotal.value) + '</b></td></tr>' +
-    '<tr><td>Weddings <span class="muted small">(' + p.weddings.count + ')</span></td><td>' + p.weddings.S + '</td><td>–</td><td></td></tr>' +
+    '<tr><td>Weddings <span class="muted small">(' + p.weddings.count + (p.weddings.estimated ? ', ' + p.weddings.estimated + ' estimated from guests' : '') + ')</span></td><td>' + p.weddings.S + '</td><td>' + (p.weddings.L || 0) + '</td><td></td></tr>' +
     '<tr><td><b>Farm shop</b></td><td><b>' + p.farm.S + '</b></td><td><b>' + p.farm.L + '</b></td><td></td></tr>' +
     '<tr style="border-top:2px solid #1c2140"><td><b>Total gone</b></td><td><b>' + p.gone.S + '</b></td><td><b>' + p.gone.L + '</b></td><td></td></tr></table></div>' +
     '<p class="small">Tubs made this week (batch records): <b>' + st(p.made.S, p.made.L) + '</b>.' + (p.untubbed && p.untubbed.length ? ' <span class="pill warn">Batch ' + esc(p.untubbed.join(', ')) + ' has no tub count yet – the figures will be out until it\'s filled in</span>' : '') + '</p>' +
@@ -930,33 +1013,60 @@ ROUTES.packaging = function () {
   var groups = {}; items.forEach(function (i) { (groups[i.group] = groups[i.group] || []).push(i); });
   var order = ['Small tub lids', 'Small tubs', 'Big tubs', 'Big tub lids', 'Big tub lid labels'];
   var names = Object.keys(groups).sort(function (a, b) { var x = order.indexOf(a), y = order.indexOf(b); return (x < 0 ? 99 : x) - (y < 0 ? 99 : y) || (a < b ? -1 : 1); });
-  render(back() + '<h1>Packaging stock</h1><p class="muted">Count what\'s there. Leave a box empty if you didn\'t count it. Labels: count the rolls (a part roll can be a half, e.g. 2.5) and check how many labels are on a roll. Anything not on the list – add it at the bottom.</p>' +
+  var isRoll = function (g) { return groups[g].some(function (i) { return i.perRoll; }) || /label/i.test(g); };
+  var word = function (g) { var u = (groups[g][0] || {}).unit || 'units'; return /lid/i.test(g) ? 'lids' : /tub/i.test(g) ? 'tubs' : u; };
+  var short_ = function (s) { return s.replace(/^(Small tub lid|Big tub lid label|Big tub) – /, ''); };
+  render(back() + '<h1>Packaging stock</h1><p class="muted">Count the <b>boxes</b> of each. Check the number in a box beside each heading – change it if a box holds a different amount. Labels: count the rolls (a part roll can be a half, e.g. 2.5). Leave a box empty if you didn\'t count it. Anything not on the list – add it at the bottom.</p>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('g_date', today(), 'date')) + field('Counted by', staffSel('g_by')) + '</div></div>' +
     (names.length ? '' : '<div class="card muted">The packaging list is still being set up – add items at the bottom.</div>') +
-    names.map(function (g) {
-      var roll = groups[g].some(function (i) { return i.perRoll || /label/i.test(i.group); });
-      return '<div class="card"><h2>' + esc(g) + '</h2><table class="t">' + (roll ? '<tr><th></th><th>Rolls</th><th>Labels per roll</th><th>Labels</th><th></th></tr>' : '') + groups[g].map(function (i) {
-        var l = last[i.item], lastTxt = mine && l ? 'last ' + (roll ? l.rolls + ' rolls' : l.qty) + ' (' + short(l.date) + ')' : '';
-        return roll
-          ? '<tr data-p="' + esc(i.item) + '" data-g="' + esc(g) + '" data-unit="rolls" data-roll="1"><td>' + esc(i.item.replace(/^Big tub lid label – /, '')) + '</td><td style="width:110px"><input data-k="rolls" inputmode="decimal"></td><td style="width:110px"><input data-k="per" inputmode="numeric" value="' + esc(i.perRoll || '') + '"></td><td class="stat" data-t="tot">–</td><td class="muted small">' + esc(lastTxt) + '</td></tr>'
-          : '<tr data-p="' + esc(i.item) + '" data-g="' + esc(g) + '" data-unit="' + esc(i.unit) + '"><td>' + esc(i.item.replace(/^(Small tub lid|Big tub) – /, '')) + '</td><td style="width:140px"><input data-k="qty" inputmode="numeric"></td><td style="width:60px">' + esc(i.unit) + '</td><td class="muted small">' + esc(lastTxt) + '</td></tr>';
-      }).join('') + '</table></div>';
+    names.map(function (g, gi) {
+      var roll = isRoll(g), w = word(g), pb = (groups[g].find(function (i) { return i.perBox; }) || {}).perBox || '';
+      var head = roll ? '<h2>' + esc(g) + '</h2>' :
+        '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><h2 style="margin:0">' + esc(g) + '</h2><label class="small" style="display:flex;align-items:center;gap:6px;margin:0">' + esc(w) + ' in a box <input data-pb="' + gi + '" inputmode="numeric" value="' + esc(pb) + '" style="width:90px"></label></div>';
+      return '<div class="card" data-grp="' + gi + '">' + head + '<table class="t">' +
+        (roll ? '<tr><th></th><th>Rolls</th><th>Labels per roll</th><th>Labels</th><th></th></tr>' : '<tr><th></th><th>Boxes</th><th>' + esc(w.charAt(0).toUpperCase() + w.slice(1)) + '</th><th></th></tr>') +
+        groups[g].map(function (i) {
+          var l = last[i.item], lastTxt = mine && l ? 'last ' + (roll ? l.rolls + ' rolls' : (l.boxes !== '' && l.boxes != null ? l.boxes + ' boxes' : l.qty)) + ' (' + short(l.date) + ')' : '';
+          return roll
+            ? '<tr data-p="' + esc(i.item) + '" data-g="' + esc(g) + '" data-roll="1"><td>' + esc(short_(i.item)) + '</td><td style="width:110px"><input data-k="rolls" inputmode="decimal"></td><td style="width:110px"><input data-k="per" inputmode="numeric" value="' + esc(i.perRoll || '') + '"></td><td class="stat" data-t="tot">–</td><td class="muted small">' + esc(lastTxt) + '</td></tr>'
+            : '<tr data-p="' + esc(i.item) + '" data-g="' + esc(g) + '" data-gi="' + gi + '" data-unit="' + esc(i.unit) + '"><td>' + esc(short_(i.item)) + '</td><td style="width:120px"><input data-k="boxes" inputmode="decimal"></td><td class="stat" data-t="tot">–</td><td class="muted small">' + esc(lastTxt) + '</td></tr>';
+        }).join('') +
+        '<tr style="border-top:2px solid #1c2140"><td><b>Total</b></td><td><b data-sum="a">–</b></td><td' + (roll ? ' colspan="2"' : '') + '><b data-sum="b">–</b></td><td></td></tr></table></div>';
     }).join('') +
     '<div class="card"><h2>Something not on the list?</h2><p class="muted small">It\'s added to the list for next time.</p><table class="t" id="g_new"></table><button class="btn soft sm" id="g_addrow" type="button">+ Add another</button></div>' +
     '<div class="bar"><button class="btn" id="g_save">Save count</button></div>');
-  function addRow() { var tr = document.createElement('tr'); tr.className = 'newpack'; tr.innerHTML = '<td><input placeholder="Item, e.g. Napoli lids" data-k="name"></td><td style="width:120px"><input placeholder="How many" inputmode="decimal" data-k="qty"></td><td style="width:110px"><input placeholder="Unit" data-k="unit" list="dl_pu"></td><td><input placeholder="Group, e.g. Boxes" data-k="group" list="dl_pg"></td>'; $('#g_new').appendChild(tr); }
-  $('#g_new').insertAdjacentHTML('afterend', '<datalist id="dl_pu"><option value="units"><option value="lids"><option value="tubs"><option value="boxes"><option value="rolls"><option value="packs"></datalist><datalist id="dl_pg">' + names.concat(['Boxes', 'Other']).map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>');
+  function addRow() { var tr = document.createElement('tr'); tr.className = 'newpack'; tr.innerHTML = '<td><input placeholder="Item, e.g. Napoli lids" data-k="name"></td><td style="width:110px"><input placeholder="Boxes" inputmode="decimal" data-k="boxes"></td><td style="width:110px"><input placeholder="In a box" inputmode="numeric" data-k="pb"></td><td><input placeholder="Group, e.g. Boxes" data-k="group" list="dl_pg"></td>'; $('#g_new').appendChild(tr); }
+  $('#g_new').insertAdjacentHTML('afterend', '<datalist id="dl_pg">' + names.concat(['Other']).map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>');
   addRow(); $('#g_addrow').onclick = addRow;
-  $$('tr[data-roll] input').forEach(function (e) { e.oninput = function () { var tr = e.closest('tr'), r = Number(tr.querySelector('[data-k=rolls]').value), p = Number(tr.querySelector('[data-k=per]').value); tr.querySelector('[data-t=tot]').textContent = tr.querySelector('[data-k=rolls]').value !== '' && p ? Math.round(r * p) : '–'; }; });
+  var numv = function (el) { return el && el.value !== '' && !isNaN(Number(el.value)) ? Number(el.value) : null; };
+  function totals() {
+    $$('[data-grp]').forEach(function (card) {
+      var gi = card.dataset.grp, pbEl = card.querySelector('[data-pb]'), pb = numv(pbEl), a = 0, b = 0, any = false;
+      $$('tr[data-p]', card).forEach(function (tr) {
+        var t = tr.querySelector('[data-t=tot]');
+        if (tr.dataset.roll) { var r = numv(tr.querySelector('[data-k=rolls]')), p = numv(tr.querySelector('[data-k=per]')); t.textContent = r != null && p ? Math.round(r * p) : '–'; if (r != null) { any = true; a += r; b += p ? Math.round(r * p) : 0; } }
+        else { var bx = numv(tr.querySelector('[data-k=boxes]')); t.textContent = bx != null && pb ? Math.round(bx * pb) : '–'; if (bx != null) { any = true; a += bx; b += pb ? Math.round(bx * pb) : 0; } }
+      });
+      var roll = !!card.querySelector('tr[data-roll]');
+      card.querySelector('[data-sum=a]').textContent = any ? r2(a, 1) + (roll ? ' rolls' : ' boxes') : '–';
+      card.querySelector('[data-sum=b]').textContent = any && (roll || pb) ? b + (roll ? ' labels' : '') : '–';
+    });
+  }
+  $$('#app input').forEach(function (e) { if (!e.closest('#g_new')) e.addEventListener('input', totals); });
+  totals();
   $('#g_save').onclick = function () {
     if (!val('g_by')) return toast('Who counted?');
     var counts = [];
-    $$('tr[data-p]').forEach(function (tr) {
-      if (tr.dataset.roll) { var r = num(tr.querySelector('[data-k=rolls]').value), p = num(tr.querySelector('[data-k=per]').value); if (r !== '') counts.push({ item: tr.dataset.p, group: tr.dataset.g, unit: 'labels', rolls: r, perRoll: p, qty: p ? Math.round(r * p) : '' }); }
-      else { var q = num(tr.querySelector('[data-k=qty]').value); if (q !== '') counts.push({ item: tr.dataset.p, group: tr.dataset.g, unit: tr.dataset.unit, qty: q }); }
+    $$('[data-grp]').forEach(function (card) {
+      var pb = numv(card.querySelector('[data-pb]'));
+      $$('tr[data-p]', card).forEach(function (tr) {
+        if (tr.dataset.roll) { var r = num(tr.querySelector('[data-k=rolls]').value), p = num(tr.querySelector('[data-k=per]').value); if (r !== '') counts.push({ item: tr.dataset.p, group: tr.dataset.g, unit: 'labels', rolls: r, perRoll: p, qty: p ? Math.round(r * p) : '' }); }
+        else { var bx = num(tr.querySelector('[data-k=boxes]').value); if (bx !== '') counts.push({ item: tr.dataset.p, group: tr.dataset.g, unit: tr.dataset.unit, boxes: bx, perBox: pb || '', qty: pb ? Math.round(bx * pb) : '' }); }
+      });
     });
-    $$('tr.newpack').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) counts.push({ item: n, group: tr.querySelector('[data-k=group]').value.trim() || 'Other', unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) === '' ? 0 : num(tr.querySelector('[data-k=qty]').value) }); });
+    $$('tr.newpack').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (!n) return; var bx = num(tr.querySelector('[data-k=boxes]').value), pb = num(tr.querySelector('[data-k=pb]').value); counts.push({ item: n, group: tr.querySelector('[data-k=group]').value.trim() || 'Other', unit: 'units', boxes: bx === '' ? 0 : bx, perBox: pb, qty: pb && bx !== '' ? Math.round(bx * pb) : '' }); });
     if (!counts.length) return toast('Nothing counted yet');
+    if (counts.some(function (c) { return c.boxes !== undefined && c.boxes !== '' && !c.perBox; }) && !confirm('Some groups have no "in a box" number, so only the boxes will be saved. Save anyway?')) return;
     record('packStock', { id: uid(), date: val('g_date'), by: val('g_by'), counts: counts }, 'Packaging count saved');
     location.hash = 'home';
   };
