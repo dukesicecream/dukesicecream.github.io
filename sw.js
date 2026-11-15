@@ -1,5 +1,5 @@
 // Keeps the app working with no internet. Bump VERSION whenever the app files change.
-const VERSION = 'dukes-v3';
+const VERSION = 'dukes-v4';
 const FILES = ['./', 'index.html', 'app.css', 'app.js', 'logo.js', 'manifest.json', 'icon.svg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
