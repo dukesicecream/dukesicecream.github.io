@@ -147,8 +147,11 @@ function applyLocal(op, data) {
     case 'ingStock': data.ingStock = (data.ingStock || []).filter(function (x) { return x.id.indexOf(d.id + ':') !== 0; }).concat(d.counts.filter(function (c) { return c.qty !== ''; }).map(function (c) { return { id: d.id + ':' + c.ingredient, date: d.date, ingredient: c.ingredient, qty: c.qty, unit: c.unit, by: d.by }; }));
       d.counts.forEach(function (c) { if (c.ingredient && !data.ingredients.some(function (i) { return i.name.toLowerCase() === c.ingredient.toLowerCase(); })) data.ingredients.push({ name: c.ingredient, unit: c.unit, track: true }); });
       break;
-    case 'recipe': if (d.notes != null) { var fi = (data.flavourInfo || []).find(function (x) { return x.name === d.flavour; }); if (fi) fi.notes = d.notes; else (data.flavourInfo = data.flavourInfo || []).push({ name: d.flavour, active: true, type: 'Limited Edition', base: true, notes: d.notes }); }
-      data.recipe = (data.recipe || []).filter(function (x) { return x.flavour !== d.flavour; }).concat(d.lines.filter(function (l) { return l.ingredient; }).map(function (l) { return { flavour: d.flavour, ingredient: l.ingredient, amount: Number(l.amount) || 0, unit: l.unit }; })); break;
+    case 'packStock': data.packStock = data.packStock || {}; (d.counts || []).forEach(function (c) { data.packStock[c.item] = { date: d.date, qty: c.qty, rolls: c.rolls, perRoll: c.perRoll, by: d.by }; if (!(data.packItems || []).some(function (i) { return i.item === c.item; })) (data.packItems = data.packItems || []).push({ item: c.item, group: c.group, unit: c.unit, perRoll: c.perRoll }); }); break;
+    case 'recipe': if (d.request) { (data.recipeRequests = data.recipeRequests || []).push({ id: op.id, date: today(), flavour: d.flavour, by: d.name, user: op.by, lines: d.lines, notes: d.notes, local: true }); break; }
+      (data.flavourInfo || []).forEach(function (x) { if (x.name === d.flavour) { x.savedBy = d.name; x.savedOn = today(); } });
+      if (d.notes != null) { var fi = (data.flavourInfo || []).find(function (x) { return x.name === d.flavour; }); if (fi) fi.notes = d.notes; else (data.flavourInfo = data.flavourInfo || []).push({ name: d.flavour, active: true, type: 'Limited Edition', base: true, notes: d.notes }); }
+      data.recipe = (data.recipe || []).filter(function (x) { return x.flavour !== d.flavour; }).concat(d.lines.filter(function (l) { return l.ingredient; }).map(function (l) { return { flavour: d.flavour, ingredient: l.ingredient, amount: Number(l.amount) || 0, per: Number(l.per) || 0, unit: l.unit }; })); break;
     case 'pack': (data.orders || []).forEach(function (o) { if (String(o.no) === String(d.no)) { o.lines = d.lines; o.status = d.done ? 'Packed' : 'Packing'; o.packedBy = d.by; if (d.done) o.packedAt = today(); } }); break;
     case 'message': data.messages = data.messages || []; upsertBy(data.messages, 'id', { id: d.id, date: today(), from: d.from, to: d.to, text: d.text, remind: d.remind, sent: false }); break;
     case 'delete': {
@@ -175,7 +178,7 @@ function route() {
   if (S.user === owner() && S.jcode && !office() && !S.oTimer) ownerIdle();
   if (!S.user && parts[0] !== 'who') { location.hash = 'who'; return; }
   var fn = ROUTES[parts[0]] || ROUTES.home;
-  if (parts[0] === 'office' && !office()) fn = ROUTES.home;
+  if (parts[0] === 'office' && !isOwner() && S.user !== manager()) fn = ROUTES.home;
   try { fn.apply(null, parts.slice(1).map(decodeURIComponent)); }
   catch (e) { render('<div class="card"><h2>Something went wrong</h2><p class="muted">' + esc(e.message) + '</p><a class="btn" href="#home">Home</a></div>'); console.error(e); }
 }
@@ -224,25 +227,41 @@ ROUTES.home = function () {
   var due = (D().due || []).filter(function (x) { return !x.hidden; });
   var links = { temps: 'temps', pest: 'pest', stock: 'stock', pack: 'packing' };
   var open = (D().batches || []).filter(function (b) { return b.status === 'Pasteurised'; });
-  var tiles = [
-    ['production', '🍦', 'Production', open.length ? open.length + ' batch' + (open.length > 1 ? 'es' : '') + ' to tub' : 'Batch records', true],
+  var mine = isOwner(), boss = mine || S.user === manager();
+  var tiles = [];
+  if (boss) tiles.push(['office', '📊', 'Office', mine ? 'Sales, stock, orders & cream' : 'Stock & what to make', true]);
+  tiles.push(['production', '🍦', 'Production', open.length ? open.length + ' batch' + (open.length > 1 ? 'es' : '') + ' to tub' : 'Batch records', !boss],
+    ['recipes', '📖', 'Recipes', 'Base mix & flavours'],
     ['deliveries', '🚚', 'Deliveries in', 'Goods received'],
+    ['packing', '🧾', 'Shop orders', 'Pack & record batches'],
+    ['stock', '🍨', 'Ice cream stock', 'Every Saturday'],
+    ['packaging', '📦', 'Packaging stock', 'Lids, tubs & labels'],
+    ['ingstock', '🥄', 'Ingredient stock', 'Count dry goods'],
     ['temps', '🌡️', 'Temperatures', 'Type up the paper sheet'],
     ['cleaning', '🧽', 'Cleaning', 'Daily · weekly · monthly'],
-    ['stock', '📦', 'Ice cream stock', 'Every Saturday'],
-    ['ingstock', '🥄', 'Ingredient stock', 'Count dry goods'],
-    ['packing', '🧾', 'Shop orders', 'Pack & record batches'],
     ['pest', '🐭', 'Pest control', 'Monthly check'],
     ['messages', '✉️', 'Messages', 'Notes & reminders'],
-    ['recipes', '📖', 'Recipes', 'Base mix & flavours'],
-    ['records', '🖨️', 'Records', 'View & print']
-  ];
-  if (S.user === owner()) tiles.push(['hours', '💷', 'Hours & pay', 'Staff hours and pay']);
+    ['records', '🖨️', 'Records', 'View & print']);
+  if (mine) tiles.push(['hours', '🔒', 'Hours & pay', 'Passcode needed']);
   else if (S.user === manager()) tiles.push(['hours', '🔒', 'Staff hours', 'Passcode needed']);
-  if (office()) tiles.unshift(['office', '📊', 'Office', 'Stock, orders & cream', true]);
+  due = due.filter(function (x) { return x.key !== 'pack'; });
+  var big = function (icon, title, sub, href, btn, ext) {
+    return '<a href="' + esc(href) + '"' + (ext ? ' target="_blank"' : '') + ' style="display:flex;align-items:center;gap:14px;background:#1c2140;color:#fff;border-radius:16px;padding:18px 20px;margin:0 0 12px;text-decoration:none;font-size:18px;box-shadow:0 4px 14px rgba(28,33,64,.25)"><span style="font-size:32px">' + icon + '</span><span style="flex:1"><b>' + esc(title) + '</b><br><small style="opacity:.8;font-size:14px">' + esc(sub) + '</small></span><span style="background:#f6f2ea;color:#1c2140;border-radius:10px;padding:10px 14px;font-weight:bold;white-space:nowrap;font-size:15px">' + esc(btn) + ' ›</span></a>';
+  };
+  var alerts = '';
+  if (mine) {
+    var waiting = (S.own && S.own.insights && S.own.insights.waiting) || (D().insights && D().insights.waiting) || [];
+    alerts += waiting.map(function (o) { return big('🛎️', 'New order from ' + o.shop + ' – please confirm', o.small + ' small, ' + o.large + ' large · ' + short(o.date) + ' · staff won\'t see it until you confirm', o.link, 'Check & confirm', true); }).join('');
+    alerts += (D().recipeRequests || []).map(function (q) { return big('📖', q.by + ' wants to change the ' + q.flavour + ' recipe', 'Nothing changes until you approve it', '#recipes/' + encodeURIComponent(q.flavour), 'Review'); }).join('');
+  }
+  alerts += (D().orders || []).filter(function (o) { return o.status === 'Confirmed' || o.status === 'Packing'; }).map(function (o) {
+    return big('📦', 'Shop order to pack: ' + o.shop, (o.small || 0) + ' small, ' + (o.large || 0) + ' large · ' + o.no + (o.status === 'Packing' ? ' · started' : ''), '#packing/' + encodeURIComponent(o.no), 'Pack it');
+  }).join('');
+  if (mine && navigator.onLine && (!S.own || Date.now() - S.ownAt > 90000)) loadOwn().then(function (x) { if (x && (location.hash || '#home') === '#home' && !(waiting || []).length && (x.insights.waiting || []).length) route(); });
   var unsent = S.queue.length;
   render('<h1>Hello ' + esc(S.user.split(' ')[0]) + '</h1>' +
     (unsent && !navigator.onLine ? '<div class="due"><span>📶</span><span>' + unsent + ' record' + (unsent > 1 ? 's are' : ' is') + ' saved on this device and will send when there\'s internet.</span></div>' : '') +
+    alerts +
     myMessages().map(function (m) { return '<div class="due" style="background:#eef0f8;border-color:#c9cde3;color:#1c2140"><span>✉️</span><span style="flex:1"><b>' + esc(m.from) + (m.to === 'Everyone' ? ' (to everyone)' : '') + ':</b> ' + esc(m.text) + ' <span class="muted small">' + esc(short(m.remind || m.date)) + '</span></span><button class="btn soft sm" data-seen="' + esc(m.id) + '">✓ Seen</button></div>'; }).join('') +
     due.map(function (x) { return '<a class="due" href="#' + (links[x.key] || 'home') + '"><span>⏰</span><span>' + esc(x.text) + '</span></a>'; }).join('') +
     '<div class="tiles" style="margin-top:14px">' + tiles.map(function (t) {
@@ -273,14 +292,32 @@ function rq(n, q) { return q === '' || q == null || isNaN(Number(q)) ? q : isDai
 function inBase(q, u) { u = String(u || '').toLowerCase(); q = Number(q) || 0; return u === 'g' || u === 'ml' ? q / 1000 : q; }
 function byAmount(a, b) { return inBase(b.qty != null ? b.qty : b.amount, b.unit) - inBase(a.qty != null ? a.qty : a.amount, a.unit); }
 function owner() { return set('Owner name') || 'Jonny Campbell'; }
+function isOwner() { return S.user === owner() && !!S.jcode; }
+// Weights over 10 kg show in kg, under in grams. Milk and cream in whole litres.
+function disp(n, q, u) {
+  if (q === '' || q == null || isNaN(Number(q))) return { q: q, unit: u };
+  var lu = String(u || '').toLowerCase(); q = Number(q);
+  if (lu === 'g' || lu === 'kg') { var g = lu === 'kg' ? q * 1000 : q; return g > 10000 ? { q: r2(g / 1000, 3), unit: 'kg' } : { q: g < 10 ? r2(g, 1) : Math.round(g), unit: 'g' }; }
+  return { q: rq(n, q), unit: u };
+}
+function perOf(l) { return Number(l.per) || setN('Base mix litres', 300); }
+function ownerCall(body) { return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'owner', k: S.key, code: S.jcode }, body)) }).then(function (r) { return r.json(); }); }
+// Jonny's office figures (sales, stock history, orders to confirm) – fetched with his passcode, never stored on the device
+function loadOwn(force) {
+  if (!isOwner() || !navigator.onLine) return Promise.resolve(S.own || null);
+  if (!force && S.own && Date.now() - S.ownAt < 90000) return Promise.resolve(S.own);
+  if (S.ownP) return S.ownP;
+  S.ownP = ownerCall({ op: 'office' }).then(function (r) { S.ownP = null; if (r.ok) { S.own = r; S.ownAt = Date.now(); } return S.own || null; }).catch(function () { S.ownP = null; return S.own || null; });
+  return S.ownP;
+}
 function manager() { return set('Hours manager name') || 'Paul Stewart'; }
 function usesBase(f) { var i = (D().flavourInfo || []).find(function (x) { return x.name === f; }); return !i || i.base; }
 function recipeLines(flavour, mix) {
-  var base = setN('Base mix litres', 58), f = mix ? Number(mix) / base : 0;
+  var m = Number(mix) || 0;
   var wb = usesBase(flavour);
   return (D().recipe || []).filter(function (r) { return (wb && r.flavour === 'All flavours (base mix)') || r.flavour === flavour; }).map(function (r) {
-    var lot = lotsFor(r.ingredient)[0];
-    return { ingredient: r.ingredient, qty: f ? rq(r.ingredient, r.amount * f) : '', unit: r.unit, batch: lot ? lot.batch : '', useBy: lot ? lot.useBy : '' };
+    var lot = lotsFor(r.ingredient)[0], d = disp(r.ingredient, m ? r.amount / perOf(r) * m : '', r.unit);
+    return { ingredient: r.ingredient, qty: m ? d.q : '', unit: d.unit, batch: lot ? lot.batch : '', useBy: lot ? lot.useBy : '' };
   }).sort(byAmount);
 }
 ROUTES.production = function () {
@@ -562,18 +599,24 @@ ROUTES.deliveries = function () {
 
 /* ---------- ice cream stock take ---------- */
 ROUTES.stock = function () {
-  var per = setN('Small tubs per tray', 48);
-  var last = {}; (D().iceStock || []).forEach(function (x) { if (!last[x.flavour] || last[x.flavour].date <= x.date) last[x.flavour] = x; });
+  var per = setN('Small tubs per tray', 48), mine = isOwner(), t = today();
+  if (mine && !S.own && navigator.onLine) loadOwn().then(function (x) { if (x && (location.hash || '').indexOf('#stock') === 0 && !$('#app').hasAttribute('data-dirty')) route(); });
+  // Jonny sees the previous counts; everyone else only sees what was entered today
+  var hist = mine ? ((S.own && S.own.iceStock) || D().iceStock || []) : [];
+  var last = {}; hist.forEach(function (x) { if (x.date < t && (!last[x.flavour] || last[x.flavour].date <= x.date)) last[x.flavour] = x; });
+  var todays = {}; (D().iceStock || []).forEach(function (x) { if (x.date === t) todays[x.flavour] = x; });
+  var todayId = ((D().iceStock || []).filter(function (x) { return x.date === t && x.id; }).map(function (x) { return String(x.id).split(':')[0]; }).pop()) || '';
   render(back() + '<h1>Ice cream stock take</h1>' +
     '<p class="muted">Large tubs: count the stacks and how high they\'re stacked (plus any odd ones). Small tubs: full trays of ' + per + ' plus any loose.</p>' +
-    '<div class="card"><div class="grid2">' + field('Date', inp('s_date', today(), 'date')) + field('Counted by', staffSel('s_by')) + '</div></div>' +
-    '<div class="card scroll"><table class="t"><tr><th>Flavour</th><th>Large: stacks</th><th>× high</th><th>+ odd</th><th>Large total</th><th>Small: trays</th><th>+ loose</th><th>Small total</th><th class="noprint">Last count</th></tr>' +
+    (todayId ? '<div class="hint">Today\'s count is filled in below – change anything and save again.</div>' : '') +
+    '<div class="card"><div class="grid2">' + field('Date', inp('s_date', t, 'date', mine ? '' : ' readonly')) + field('Counted by', staffSel('s_by', todayId ? ((D().iceStock || []).find(function (x) { return x.date === t; }) || {}).by : null)) + '</div></div>' +
+    '<div class="card scroll"><table class="t"><tr><th>Flavour</th><th>Large: stacks</th><th>× high</th><th>+ odd</th><th>Large total</th><th>Small: trays</th><th>+ loose</th><th>Small total</th>' + (mine ? '<th class="noprint">Last count</th>' : '') + '</tr>' +
     (D().flavours || []).map(function (f, i) {
-      var l = last[f];
+      var l = last[f], c = todays[f] || {}, v = function (k) { return esc(c[k] == null ? '' : c[k]); };
       return '<tr data-f="' + esc(f) + '"><td><b>' + esc(f) + '</b></td>' +
-        '<td><input data-k="stacks" inputmode="numeric" style="width:70px"></td><td><input data-k="height" inputmode="numeric" style="width:70px"></td><td><input data-k="lextra" inputmode="numeric" style="width:70px"></td><td class="stat" data-t="large" style="font-size:20px">–</td>' +
-        '<td><input data-k="trays" inputmode="numeric" style="width:70px"></td><td><input data-k="loose" inputmode="numeric" style="width:70px"></td><td class="stat" data-t="small" style="font-size:20px">–</td>' +
-        '<td class="muted small noprint">' + (l ? esc(short(l.date)) + ': ' + (l.large || 0) + ' L / ' + (l.small || 0) + ' S' : '–') + '</td></tr>';
+        '<td><input data-k="stacks" inputmode="numeric" style="width:70px" value="' + v('stacks') + '"></td><td><input data-k="height" inputmode="numeric" style="width:70px" value="' + v('height') + '"></td><td><input data-k="lextra" inputmode="numeric" style="width:70px" value="' + v('lextra') + '"></td><td class="stat" data-t="large" style="font-size:20px">–</td>' +
+        '<td><input data-k="trays" inputmode="numeric" style="width:70px" value="' + v('trays') + '"></td><td><input data-k="loose" inputmode="numeric" style="width:70px" value="' + v('loose') + '"></td><td class="stat" data-t="small" style="font-size:20px">–</td>' +
+        (mine ? '<td class="muted small noprint">' + (l ? esc(short(l.date)) + ': ' + (l.large || 0) + ' L / ' + (l.small || 0) + ' S' : '–') + '</td>' : '') + '</tr>';
     }).join('') + '</table></div>' +
     '<div class="bar"><button class="btn" id="s_save">Save stock take</button></div>');
   function calc(tr) {
@@ -584,6 +627,7 @@ ROUTES.stock = function () {
     return { any: any, flavour: tr.dataset.f, stacks: num(tr.querySelector('[data-k=stacks]').value), height: num(tr.querySelector('[data-k=height]').value), lextra: num(tr.querySelector('[data-k=lextra]').value), large: L, trays: num(tr.querySelector('[data-k=trays]').value), loose: num(tr.querySelector('[data-k=loose]').value), small: Sm };
   }
   $$('tr[data-f] input').forEach(function (e) { e.oninput = function () { calc(e.closest('tr')); $('#app').setAttribute('data-dirty', '1'); }; });
+  $$('tr[data-f]').forEach(calc);
   $('#s_save').onclick = function () {
     if (!val('s_by')) return toast('Who counted?');
     var rows = $$('tr[data-f]').map(calc), counted = rows.filter(function (r) { return r.any; });
@@ -591,7 +635,7 @@ ROUTES.stock = function () {
     var missing = rows.length - counted.length;
     if (missing && !confirm(missing + ' flavour(s) have no count. Save them as zero (none in stock)?')) return;
     rows.forEach(function (r) { delete r.any; });
-    record('iceStock', { id: uid(), date: val('s_date'), by: val('s_by'), counts: rows }, 'Stock take saved');
+    record('iceStock', { id: val('s_date') === t && todayId ? todayId : uid(), date: val('s_date'), by: val('s_by'), counts: rows }, 'Stock take saved');
     $('#app').removeAttribute('data-dirty'); location.hash = 'home';
   };
 };
@@ -701,36 +745,73 @@ ROUTES.recipes = function (f) {
   var flavours = [BASE].concat((D().flavours || []).filter(function (x) { return ltd.indexOf(x) < 0; }));
   f = f || BASE;
   var wb = f === BASE || usesBase(f);
-  var lines = (D().recipe || []).filter(function (r) { return r.flavour === f; }).map(function (r) { return Object.assign({}, r, { amount: rq(r.ingredient, r.amount) }); }).sort(byAmount);
-  if (!lines.length) lines.push({ ingredient: '', amount: '', unit: 'kg' });
-  var base = setN('Base mix litres', 58);
+  var base = setN('Base mix litres', 300), mine = isOwner();
+  var saved = (D().recipe || []).filter(function (r) { return r.flavour === f; });
+  var exists = saved.length > 0, locked = f === BASE && !mine;
+  var lines = saved.map(function (r) { return { ingredient: r.ingredient, amount: r.amount, unit: r.unit, per: perOf(r) }; }).sort(function (a, b) { return inBase(b.amount / b.per, b.unit) - inBase(a.amount / a.per, a.unit); });
+  if (!lines.length) lines.push({ ingredient: '', amount: '', unit: 'kg', per: base });
+  var fi = info.find(function (x) { return x.name === f; }) || {};
+  var reqs = (D().recipeRequests || []).filter(function (q) { return q.flavour === f; });
   var chip = function (x) { return '<a class="chip' + (x === f ? ' on' : '') + '" href="#recipes/' + encodeURIComponent(x) + '">' + esc(x === BASE ? 'Base mix' : x) + '</a>'; };
   render(back() + '<h1>Recipes</h1><div class="card noprint">' + flavours.map(chip).join('') +
     '<h3>Limited Edition</h3>' + (ltd.map(chip).join('') || '<span class="muted small">None saved yet. </span>') + '<a class="chip" href="#" id="r_newltd">+ New limited edition</a></div>' +
-    '<div class="card"><h2>' + esc(f) + (ltd.indexOf(f) >= 0 ? ' <span class="pill">Limited Edition</span>' : '') + '</h2><p class="muted">Amounts per ' + base + ' L of mix.' + (f === BASE ? ' Every flavour uses the base mix, plus its own extras (except non-dairy flavours like sorbet).' : wb ? ' These are added on top of the base mix.' : ' <b>This flavour doesn\'t use the dairy base mix</b> – list everything that goes in.') + '</p>' +
-    '<table class="t" id="r_t"></table><button class="btn soft sm noprint" id="r_add" type="button">+ Add ingredient</button>' +
-    (f === BASE ? '' : field('Notes / method', '<textarea id="r_notes" rows="4">' + esc(((info.find(function (x) { return x.name === f; }) || {}).notes) || '') + '</textarea>')) + '</div>' +
+    reqs.map(function (q) {
+      return '<div class="card" style="border:2px solid #b58a00"><h2>⏳ Change waiting for ' + esc(owner().split(' ')[0]) + '\'s OK</h2><p class="muted">Asked for by <b>' + esc(q.by) + '</b> on ' + esc(nice(q.date)) + (q.user && q.user !== q.by ? ' (on ' + esc(q.user) + '\'s app)' : '') + '. The recipe below stays as it is until it\'s approved.</p>' +
+        '<table class="t"><tr><th>Ingredient</th><th>Amount</th><th>Unit</th><th>Litres</th></tr>' + (q.lines || []).map(function (l) { return '<tr><td>' + esc(l.ingredient) + '</td><td>' + esc(l.amount) + '</td><td>' + esc(l.unit) + '</td><td>' + esc(l.per || base) + '</td></tr>'; }).join('') + '</table>' +
+        (q.notes ? '<p><b>Notes:</b> ' + esc(q.notes) + '</p>' : '') +
+        (mine && !q.local ? '<div class="noprint"><button class="btn" data-ok="' + esc(q.id) + '">✓ Approve change</button> <button class="btn alt" data-no="' + esc(q.id) + '">Turn down</button></div>' : '') + '</div>';
+    }).join('') +
+    '<div class="card"><h2>' + esc(f) + (ltd.indexOf(f) >= 0 ? ' <span class="pill">Limited Edition</span>' : '') + '</h2><p class="muted">' + (f === BASE ? 'Every flavour uses the base mix, plus its own extras (except non-dairy flavours like sorbet).' : wb ? 'These are added on top of the base mix.' : '<b>This flavour doesn\'t use the dairy base mix</b> – list everything that goes in.') +
+    ' <b>Litres</b> is how much mix the amount is for – 1 for per litre, ' + base + ' for a full batch.</p>' +
+    (fi.savedBy ? '<p class="small muted">Saved by <b>' + esc(fi.savedBy) + '</b>' + (fi.savedOn ? ' on ' + esc(nice(fi.savedOn)) : '') + '</p>' : '') +
+    (locked ? '<p class="hint">Only ' + esc(owner().split(' ')[0]) + ' can change the base mix. You can scale it below.</p>' : exists && !mine ? '<p class="hint noprint">Changes to a saved recipe go to ' + esc(owner().split(' ')[0]) + ' to approve first.</p>' : '') +
+    '<table class="t" id="r_t"></table>' + (locked ? '' : '<button class="btn soft sm noprint" id="r_add" type="button">+ Add ingredient</button>') +
+    (f === BASE ? '' : field('Notes / method', '<textarea id="r_notes" rows="4">' + esc(fi.notes || '') + '</textarea>')) +
+    (locked || mine ? '' : '<div class="grid2 noprint">' + field(exists ? 'Your name (who is asking for the change)' : 'Your name (who is saving this recipe)', inp('r_name', '', 'text', ' autocomplete="off" placeholder="Type your full name"')) + '</div>') + '</div>' +
     '<div class="card noprint"><h2>Scale it</h2>' + field('Litres of mix', inp('r_l', base, 'number')) + '<div id="r_scaled"></div></div>' +
-    '<div class="bar"><button class="btn alt" onclick="window.print()">Print</button><button class="btn" id="r_save">Save recipe</button></div>');
+    '<div class="bar"><button class="btn alt" onclick="window.print()">Print</button>' + (locked ? '' : '<button class="btn" id="r_save">' + (exists && !mine ? 'Send change to ' + esc(owner().split(' ')[0]) : 'Save recipe') + '</button>') + '</div>');
   function draw() {
-    $('#r_t').innerHTML = '<tr><th>Ingredient</th><th>Amount</th><th>Unit</th><th></th></tr>' + lines.map(function (l, i) {
-      return '<tr><td><input data-i="' + i + '" data-k="ingredient" value="' + esc(l.ingredient) + '" list="dl_ri"></td><td><input data-i="' + i + '" data-k="amount" inputmode="decimal" value="' + esc(l.amount) + '" style="width:100px"></td><td><input data-i="' + i + '" data-k="unit" value="' + esc(l.unit) + '" style="width:70px"></td><td><button class="btn soft sm" data-del="' + i + '">✕</button></td></tr>';
-    }).join('') + '<datalist id="dl_ri">' + (D().ingredients || []).map(function (g) { return '<option value="' + esc(g.name) + '">'; }).join('') + '</datalist>';
+    if (locked) {
+      $('#r_t').innerHTML = '<tr><th>Ingredient</th><th>Amount</th><th>Unit</th><th>Litres</th></tr>' + lines.map(function (l) { var d = disp(l.ingredient, l.amount, l.unit); return '<tr><td>' + esc(l.ingredient) + '</td><td><b>' + esc(d.q) + '</b></td><td>' + esc(d.unit) + '</td><td>' + esc(l.per) + '</td></tr>'; }).join('');
+      return scale();
+    }
+    $('#r_t').innerHTML = '<tr><th>Ingredient</th><th>Amount</th><th>Unit</th><th>Litres</th><th></th></tr>' + lines.map(function (l, i) {
+      return '<tr><td><input data-i="' + i + '" data-k="ingredient" value="' + esc(l.ingredient) + '" list="dl_ri"></td><td><input data-i="' + i + '" data-k="amount" inputmode="decimal" value="' + esc(l.amount) + '" style="width:100px"></td><td><input data-i="' + i + '" data-k="unit" value="' + esc(l.unit) + '" style="width:70px" list="dl_ru"></td>' +
+        '<td><input data-i="' + i + '" data-k="per" inputmode="decimal" value="' + esc(l.per) + '" style="width:80px" title="Litres of mix this amount is for"></td><td><button class="btn soft sm" data-del="' + i + '">✕</button></td></tr>';
+    }).join('') + '<datalist id="dl_ru"><option value="kg"><option value="g"><option value="L"><option value="ml"><option value="units"></datalist><datalist id="dl_ri">' + (D().ingredients || []).map(function (g) { return '<option value="' + esc(g.name) + '">'; }).join('') + '</datalist>';
     $$('#r_t input').forEach(function (e) { e.oninput = function () { lines[e.dataset.i][e.dataset.k] = e.value; scale(); }; });
     $$('#r_t [data-del]').forEach(function (b) { b.onclick = function () { lines.splice(Number(b.dataset.del), 1); draw(); }; });
     scale();
   }
   function scale() {
-    var L = Number(val('r_l')) || base, k = L / base;
+    var L = Number(val('r_l')) || base;
     var all = f === BASE || !wb ? lines : (D().recipe || []).filter(function (r) { return r.flavour === BASE; }).concat(lines);
-    $('#r_scaled').innerHTML = '<table class="t">' + all.filter(function (l) { return l.ingredient; }).map(function (l) { return { ingredient: l.ingredient, qty: rq(l.ingredient, Number(l.amount) * k), unit: l.unit }; }).sort(byAmount).map(function (l) { return '<tr><td>' + esc(l.ingredient) + '</td><td><b>' + l.qty + '</b> ' + esc(l.unit) + '</td></tr>'; }).join('') + '</table>';
+    $('#r_scaled').innerHTML = '<table class="t">' + all.filter(function (l) { return l.ingredient; }).map(function (l) { var d = disp(l.ingredient, Number(l.amount) / perOf(l) * L, l.unit); return { ingredient: l.ingredient, qty: d.q, unit: d.unit }; }).sort(byAmount).map(function (l) { return '<tr><td>' + esc(l.ingredient) + '</td><td><b>' + l.qty + '</b> ' + esc(l.unit) + '</td></tr>'; }).join('') + '</table>';
   }
   draw(); $('#r_l').oninput = scale;
   $('#r_newltd').onclick = function (ev) { ev.preventDefault(); var n = (prompt('Name of the new limited edition flavour') || '').trim(); if (n) location.hash = 'recipes/' + encodeURIComponent(n); };
-  $('#r_add').onclick = function () { lines.push({ ingredient: '', amount: '', unit: 'kg' }); draw(); };
-  $('#r_save').onclick = function () {
-    if (f === BASE && !confirm('Change the base mix for every flavour?')) return;
-    record('recipe', { flavour: f, lines: lines.filter(function (l) { return l.ingredient; }), notes: f === BASE ? null : val('r_notes') }, 'Recipe saved');
+  if ($('#r_add')) $('#r_add').onclick = function () { lines.push({ ingredient: '', amount: '', unit: 'kg', per: base }); draw(); };
+  var decide = function (id, ok) {
+    if (!navigator.onLine) return toast('Needs the internet');
+    ownerCall({ op: 'decide', id: id, approve: ok }).then(function (r) { toast(r.ok ? r.msg : (r.error || 'Could not do that')); sync(); }).catch(function () { toast('No connection'); });
+  };
+  $$('[data-ok]').forEach(function (b) { b.onclick = function () { decide(b.dataset.ok, true); }; });
+  $$('[data-no]').forEach(function (b) { b.onclick = function () { if (confirm('Turn this change down? The recipe stays as it is.')) decide(b.dataset.no, false); }; });
+  if ($('#r_save')) $('#r_save').onclick = function () {
+    var ls = lines.filter(function (l) { return l.ingredient; }).map(function (l) { return { ingredient: l.ingredient, amount: num(l.amount) === '' ? 0 : num(l.amount), unit: l.unit, per: num(l.per) || base }; });
+    if (!ls.length) return toast('Add at least one ingredient');
+    if (ls.some(function (l) { return !l.amount; }) && !confirm('Some ingredients have no amount. Save anyway?')) return;
+    var notes = f === BASE ? null : val('r_notes');
+    if (mine) {
+      if (f === BASE && !confirm('Change the base mix for every flavour?')) return;
+      if (!navigator.onLine) return toast('Saving as ' + owner().split(' ')[0] + ' needs the internet');
+      $('#r_save').disabled = true;
+      return ownerCall({ op: 'recipe', d: { flavour: f, lines: ls, notes: notes } }).then(function (r) { toast(r.ok ? 'Recipe saved' : (r.error || 'Could not save')); $('#r_save').disabled = false; if (r.ok) { applyLocal({ type: 'recipe', data: { flavour: f, lines: ls, notes: notes, name: owner() } }, S.data); save(LS.data, S.data); sync(); route(); } })
+        .catch(function () { $('#r_save').disabled = false; toast('No connection'); });
+    }
+    var name = val('r_name');
+    if (name.length < 3) { toast('Type your name first'); return $('#r_name').focus(); }
+    record('recipe', { flavour: f, lines: ls, notes: notes, name: name, request: exists }, exists ? 'Sent to ' + owner().split(' ')[0] + ' to approve' : 'Recipe saved');
     route();
   };
 };
@@ -738,7 +819,9 @@ ROUTES.recipes = function (f) {
 /* ---------- records: view & print ---------- */
 ROUTES.records = function (kind, from, to) {
   kind = kind || 'batches'; to = to || today(); from = from || addDays(to, -31);
-  var kinds = [['batches', 'Batch records'], ['deliveries', 'Deliveries'], ['temps', 'Temperatures'], ['cleaning', 'Cleaning'], ['pest', 'Pest control'], ['stock', 'Stock takes']];
+  var kinds = [['batches', 'Batch records'], ['deliveries', 'Deliveries'], ['temps', 'Temperatures'], ['cleaning', 'Cleaning'], ['pest', 'Pest control']];
+  if (isOwner()) kinds.push(['stock', 'Stock takes']); else if (kind === 'stock') kind = 'batches';
+  if (kind === 'stock' && !S.own && navigator.onLine) loadOwn().then(function (x) { if (x && (location.hash || '').indexOf('#records/stock') === 0) route(); });
   var inRange = function (d) { return d && d >= from && d <= to; };
   var body = '';
   if (kind === 'batches') {
@@ -766,7 +849,7 @@ ROUTES.records = function (kind, from, to) {
   } else if (kind === 'pest') {
     body = '<div class="card"><table class="t"><tr><th>Date</th><th>Checked by</th><th>Issues</th><th>Action</th><th>Verified</th><th>Notes</th></tr>' + (D().pest || []).filter(function (p) { return inRange(p.date); }).map(function (p) { return '<tr><td>' + esc(nice(p.date)) + '</td><td>' + esc(p.by) + '</td><td>' + esc(p.issues) + '</td><td>' + esc(p.action) + '</td><td>' + esc(p.verified) + '</td><td>' + esc(p.notes) + '</td></tr>'; }).join('') + '</table></div>';
   } else if (kind === 'stock') {
-    var byDate = {}; (D().iceStock || []).filter(function (x) { return inRange(x.date); }).forEach(function (x) { (byDate[x.date] = byDate[x.date] || []).push(x); });
+    var byDate = {}; ((S.own && S.own.iceStock) || D().iceStock || []).filter(function (x) { return inRange(x.date); }).forEach(function (x) { (byDate[x.date] = byDate[x.date] || []).push(x); });
     body = Object.keys(byDate).sort().reverse().map(function (d) { return '<div class="card"><h2>' + esc(nice(d)) + '</h2><table class="t"><tr><th>Flavour</th><th>Large</th><th>Small</th><th>Counted by</th></tr>' + byDate[d].map(function (x) { return '<tr><td>' + esc(x.flavour) + '</td><td>' + esc(x.large) + '</td><td>' + esc(x.small) + '</td><td>' + esc(x.by) + '</td></tr>'; }).join('') + '</table></div>'; }).join('') || '<div class="card muted">No stock takes in these dates.</div>';
   }
   render(back() + '<h1>Records</h1><div class="card noprint">' + kinds.map(function (k) { return '<a class="chip' + (k[0] === kind ? ' on' : '') + '" href="#records/' + k[0] + '/' + from + '/' + to + '">' + k[1] + '</a>'; }).join('') +
@@ -780,26 +863,103 @@ ROUTES.records = function (kind, from, to) {
 /* ---------- office (Jonny only) ---------- */
 var SHEET_URL = 'https://docs.google.com/spreadsheets/d/1LFMR9kXMjVzS5M8tx852HBwlc0C1LTbnsB8Wxsh17s8/edit';
 ROUTES.office = function () {
-  var I = D().insights || {};
+  var mine = isOwner();
+  var useLocal = mine && office() && D().insights;
+  var go = function (data) { if ((location.hash || '').indexOf('#office') === 0) drawOffice(data, mine); };
+  if (mine && S.own && Date.now() - S.ownAt < 90000) return go(S.own);
+  if (S.user === manager() && S.mgr && Date.now() - S.mgrAt < 90000) return go(S.mgr);
+  if (!navigator.onLine) {
+    if (mine && (S.own || useLocal)) return go(S.own || { insights: D().insights });
+    if (S.mgr) return go(S.mgr);
+    return render(back() + '<h1>Office</h1><div class="card">The office page needs the internet.</div>');
+  }
+  render(back() + '<h1>Office</h1><p class="muted center">Loading…</p>');
+  if (mine) loadOwn(true).then(function (x) { go(x || (useLocal ? { insights: D().insights } : { insights: {} })); });
+  else fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'office', k: S.key, by: S.user }) }).then(function (r) { return r.json(); })
+    .then(function (r) { if (!r.ok) { toast(r.error || 'Could not open'); location.hash = 'home'; return; } S.mgr = r; S.mgrAt = Date.now(); go(r); })
+    .catch(function () { render(back() + '<h1>Office</h1><div class="card">No connection.</div>'); });
+};
+function salesHtml(sales) {
+  var ps = (sales && sales.periods) || [];
+  if (!ps.length) return '<div class="card"><h2>Sales</h2><p class="muted">' + esc((sales && sales.note) || 'Sales show once there are two stock takes to compare.') + '</p></div>';
+  var p = ps[0], st = function (s, l) { return (s || 0) + ' small' + (l ? ', ' + l + ' large' : ''); };
+  var money = function (n) { return '£' + (Number(n) || 0).toFixed(2); };
+  var rows = p.shops.map(function (s) { return '<tr><td>' + esc(s.shop) + ' <span class="muted small">(' + s.orders + ' order' + (s.orders > 1 ? 's' : '') + ')</span></td><td>' + s.S + '</td><td>' + s.L + '</td><td>' + money(s.value) + '</td></tr>'; }).join('');
+  return '<div class="card"><h2>💷 Sales – ' + esc(short(p.from)) + ' to ' + esc(short(p.to)) + '</h2>' +
+    '<p class="muted small">From the stock takes: last count + tubs made (batch records) − this count = tubs gone. Shops are the orders packed, weddings are one small tub per guest, and the rest went through the farm shop. Only you see this.</p>' +
+    '<div class="scroll"><table class="t"><tr><th>Where</th><th>Small</th><th>Large</th><th>Value</th></tr>' + rows +
+    '<tr><td><b>All shops</b></td><td><b>' + p.shopTotal.S + '</b></td><td><b>' + p.shopTotal.L + '</b></td><td><b>' + money(p.shopTotal.value) + '</b></td></tr>' +
+    '<tr><td>Weddings <span class="muted small">(' + p.weddings.count + ')</span></td><td>' + p.weddings.S + '</td><td>–</td><td></td></tr>' +
+    '<tr><td><b>Farm shop</b></td><td><b>' + p.farm.S + '</b></td><td><b>' + p.farm.L + '</b></td><td></td></tr>' +
+    '<tr style="border-top:2px solid #1c2140"><td><b>Total gone</b></td><td><b>' + p.gone.S + '</b></td><td><b>' + p.gone.L + '</b></td><td></td></tr></table></div>' +
+    '<p class="small">Tubs made this week (batch records): <b>' + st(p.made.S, p.made.L) + '</b>.' + (p.untubbed && p.untubbed.length ? ' <span class="pill warn">Batch ' + esc(p.untubbed.join(', ')) + ' has no tub count yet – the figures will be out until it\'s filled in</span>' : '') + '</p>' +
+    '<details><summary>By flavour</summary><table class="t"><tr><th>Flavour</th><th>Small gone</th><th>Large gone</th><th>Made</th></tr>' + p.byFlavour.map(function (f) { return '<tr><td>' + esc(f.flavour) + '</td><td>' + f.S + '</td><td>' + f.L + '</td><td class="muted small">' + (f.madeS || f.madeL ? st(f.madeS, f.madeL) : '') + '</td></tr>'; }).join('') + '</table></details>' +
+    (ps.length > 1 ? '<details><summary>Earlier weeks</summary><div class="scroll"><table class="t"><tr><th>Week</th><th>Shops</th><th>Shops £</th><th>Weddings</th><th>Farm shop</th><th>Total gone</th></tr>' + ps.slice(1).map(function (q) {
+      return '<tr><td>' + esc(short(q.from)) + ' – ' + esc(short(q.to)) + '</td><td>' + st(q.shopTotal.S, q.shopTotal.L) + '</td><td>' + money(q.shopTotal.value) + '</td><td>' + q.weddings.S + '</td><td>' + st(q.farm.S, q.farm.L) + '</td><td>' + st(q.gone.S, q.gone.L) + '</td></tr>';
+    }).join('') + '</table></div></details>' : '') + '</div>';
+}
+function drawOffice(data, mine) {
+  var I = (data && data.insights) || {};
   var wk = function (x) { return x == null ? '<span class="muted">no count yet</span>' : x + ' wks'; };
   var short_ = (I.flavours || []).filter(function (f) { return f.shortfall > 0; });
+  var reqs = mine ? (D().recipeRequests || []) : [];
   render(back() + '<h1>Office</h1>' +
     '<div class="tiles noprint" style="margin-bottom:16px">' +
-    '<a class="tile dark" href="' + esc(I.creamLink || '#') + '" target="_blank"><span class="ic">🥛</span><span><b>Cream & milk order</b><br><small>Strathroy – by 12 noon Monday</small></span></a>' +
-    '<a class="tile" href="' + SHEET_URL + '" target="_blank"><span class="ic">📗</span><span><b>Google Sheet</b><br><small>Prices, shops, settings, lists</small></span></a>' +
+    (mine ? '<a class="tile dark" href="' + esc(I.creamLink || '#') + '" target="_blank"><span class="ic">🥛</span><span><b>Cream & milk order</b><br><small>Strathroy – by 12 noon Monday</small></span></a>' +
+      '<a class="tile" href="' + SHEET_URL + '" target="_blank"><span class="ic">📗</span><span><b>Google Sheet</b><br><small>Prices, shops, settings, lists</small></span></a>' : '') +
     '<a class="tile" href="#packing"><span class="ic">🧾</span><span><b>Shop orders</b><br><small>Packing list</small></span></a></div>' +
     (short_.length ? '<div class="due bad"><span>💍</span><span><b>Weddings need more stock:</b> ' + short_.map(function (f) { return esc(f.flavour) + ' (' + f.shortfall + ' small tubs short)'; }).join(', ') + '</span></div>' : '') +
-    ((I.waiting || []).length ? '<div class="card"><h2>Shop orders to confirm</h2>' + I.waiting.map(function (o) { return '<div class="row"><span><b>' + esc(o.shop) + '</b> · ' + esc(o.no) + '<br><span class="muted">' + esc(nice(o.date)) + ' · ' + o.small + ' small, ' + o.large + ' large</span></span><a class="btn sm" target="_blank" href="' + esc(o.link) + '">Check & confirm</a></div>'; }).join('') + '</div>' : '') +
-    '<div class="card"><h2>Make next</h2><p class="muted small">Estimated from the last stock take, plus batches tubbed, minus shop orders packed and weddings since. Weeks left is based on how fast each flavour has gone recently.</p><div class="scroll"><table class="t"><tr><th>Flavour</th><th>Large now</th><th>Small now</th><th>Uses (L/week)</th><th>Weeks left</th><th>Weddings ahead</th></tr>' +
+    (mine && (I.waiting || []).length ? '<div class="card"><h2>Shop orders to confirm</h2>' + I.waiting.map(function (o) { return '<div class="row"><span><b>' + esc(o.shop) + '</b> · ' + esc(o.no) + '<br><span class="muted">' + esc(nice(o.date)) + ' · ' + o.small + ' small, ' + o.large + ' large</span></span><a class="btn sm" target="_blank" href="' + esc(o.link) + '">Check & confirm</a></div>'; }).join('') + '</div>' : '') +
+    (reqs.length ? '<div class="card"><h2>Recipe changes to approve</h2>' + reqs.map(function (q) { return '<a class="row" href="#recipes/' + encodeURIComponent(q.flavour) + '"><span><b>' + esc(q.flavour) + '</b><br><span class="muted">asked for by ' + esc(q.by) + ' · ' + esc(short(q.date)) + '</span></span><span class="btn sm">Review</span></a>'; }).join('') + '</div>' : '') +
+    (mine ? salesHtml(data.sales) : '') +
+    '<div class="card"><h2>Make next</h2><p class="muted small">Estimated from the last stock take, plus batches tubbed, minus shop orders packed and weddings since.</p><div class="scroll"><table class="t"><tr><th>Flavour</th><th>Large now</th><th>Small now</th>' + (mine ? '<th>Uses (L/week)</th>' : '') + '<th>Weeks left</th><th>Weddings ahead</th></tr>' +
     (I.produceFirst && I.produceFirst.length ? I.produceFirst : (I.flavours || [])).map(function (p) {
       var f = (I.flavours || []).find(function (x) { return x.flavour === p.flavour; }) || p;
-      return '<tr><td><b>' + esc(f.flavour) + '</b></td><td>' + (f.large == null ? '–' : f.large) + '</td><td>' + (f.small == null ? '–' : f.small) + '</td><td>' + (f.weeklyLitres || '–') + '</td><td>' + (f.weeksLeft != null && f.weeksLeft < 2 ? '<span class="pill bad">' + f.weeksLeft + ' wks</span>' : wk(f.weeksLeft)) + '</td><td>' + (f.reservedSmall ? f.reservedSmall + ' small' + (f.shortfall ? ' <span class="pill bad">' + f.shortfall + ' short</span>' : '') : '') + '</td></tr>';
+      return '<tr><td><b>' + esc(f.flavour) + '</b></td><td>' + (f.large == null ? '–' : f.large) + '</td><td>' + (f.small == null ? '–' : f.small) + '</td>' + (mine ? '<td>' + (f.weeklyLitres || '–') + '</td>' : '') + '<td>' + (f.weeksLeft != null && f.weeksLeft < 2 ? '<span class="pill bad">' + f.weeksLeft + ' wks</span>' : wk(f.weeksLeft)) + '</td><td>' + (f.reservedSmall ? f.reservedSmall + ' small' + (f.shortfall ? ' <span class="pill bad">' + f.shortfall + ' short</span>' : '') : '') + '</td></tr>';
     }).join('') + '</table></div></div>' +
-    '<div class="card"><h2>Best sellers</h2>' + ((I.bestSellers || []).map(function (b, i) { return '<div class="row"><span>' + (i + 1) + '. ' + esc(b.flavour) + '</span><b>' + b.weeklyLitres + ' L/week</b></div>'; }).join('') || '<p class="muted">Builds up as stock takes and orders are recorded.</p>') + '</div>' +
-    '<div class="card"><h2>Ingredients – when to order</h2><p class="muted small">From the last count, plus deliveries, minus what batches used. Flagged when it will run out within its lead time (+1 week). Lead times and suppliers are on the Ingredients tab.</p><div class="scroll"><table class="t"><tr><th>Ingredient</th><th>In stock (est.)</th><th>Use per week</th><th>Weeks left</th><th>Lead time</th><th>Supplier</th></tr>' +
+    (mine ? '<div class="card"><h2>Best sellers</h2>' + ((I.bestSellers || []).map(function (b, i) { return '<div class="row"><span>' + (i + 1) + '. ' + esc(b.flavour) + '</span><b>' + b.weeklyLitres + ' L/week</b></div>'; }).join('') || '<p class="muted">Builds up as stock takes and orders are recorded.</p>') + '</div>' : '') +
+    '<div class="card"><h2>Ingredients – when to order</h2><p class="muted small">From the last count, plus deliveries, minus what batches used. Flagged when it will run out within its lead time (+1 week).</p><div class="scroll"><table class="t"><tr><th>Ingredient</th><th>In stock (est.)</th><th>Use per week</th><th>Weeks left</th><th>Lead time</th><th>Supplier</th></tr>' +
     (I.ingredients || []).map(function (g) { return '<tr><td>' + esc(g.name) + '</td><td>' + (g.est == null ? '<span class="muted">not counted</span>' : g.est + ' ' + esc(g.unit)) + '</td><td>' + (g.weeklyUse || '–') + '</td><td>' + (g.warn ? '<span class="pill bad">' + g.weeksLeft + ' – order now</span>' : (g.weeksLeft == null ? '–' : g.weeksLeft)) + '</td><td>' + g.lead + ' wks</td><td>' + esc(g.supplier || '?') + '</td></tr>'; }).join('') + '</table></div></div>' +
     '<div class="card"><h2>Weddings coming up</h2>' + ((I.weddings || []).map(function (w) { return '<div class="row"><span><b>' + esc(nice(w.date)) + '</b> · ' + esc(w.name) + '<br><span class="muted">' + esc(w.flavours.join(', ') || 'Flavours not chosen yet') + '</span></span><span>' + w.guests + ' guests</span></div>'; }).join('') || '<p class="muted">None booked in the next few weeks.</p>') + '</div>' +
     '<div class="card"><h2>Shop orders expected</h2>' + ((I.shops || []).map(function (s) { return '<div class="row"><span><b>' + esc(s.shop) + '</b><br><span class="muted">' + s.orders + ' orders · usually ' + s.small + ' small / ' + s.large + ' large' + (s.avgDays ? ' · every ' + s.avgDays + ' days' : '') + '</span></span><span>' + (s.nextDue ? 'about ' + esc(short(s.nextDue)) : '–') + '</span></div>'; }).join('') || '<p class="muted">Builds up once shops order through their links.</p>') + '</div>');
+}
+
+/* ---------- packaging stock ---------- */
+ROUTES.packaging = function () {
+  var items = D().packItems || [], last = D().packStock || {}, mine = isOwner();
+  var groups = {}; items.forEach(function (i) { (groups[i.group] = groups[i.group] || []).push(i); });
+  var order = ['Small tub lids', 'Small tubs', 'Big tubs', 'Big tub lids', 'Big tub lid labels'];
+  var names = Object.keys(groups).sort(function (a, b) { var x = order.indexOf(a), y = order.indexOf(b); return (x < 0 ? 99 : x) - (y < 0 ? 99 : y) || (a < b ? -1 : 1); });
+  render(back() + '<h1>Packaging stock</h1><p class="muted">Count what\'s there. Leave a box empty if you didn\'t count it. Labels: count the rolls (a part roll can be a half, e.g. 2.5) and check how many labels are on a roll. Anything not on the list – add it at the bottom.</p>' +
+    '<div class="card"><div class="grid2">' + field('Date', inp('g_date', today(), 'date')) + field('Counted by', staffSel('g_by')) + '</div></div>' +
+    (names.length ? '' : '<div class="card muted">The packaging list is still being set up – add items at the bottom.</div>') +
+    names.map(function (g) {
+      var roll = groups[g].some(function (i) { return i.perRoll || /label/i.test(i.group); });
+      return '<div class="card"><h2>' + esc(g) + '</h2><table class="t">' + (roll ? '<tr><th></th><th>Rolls</th><th>Labels per roll</th><th>Labels</th><th></th></tr>' : '') + groups[g].map(function (i) {
+        var l = last[i.item], lastTxt = mine && l ? 'last ' + (roll ? l.rolls + ' rolls' : l.qty) + ' (' + short(l.date) + ')' : '';
+        return roll
+          ? '<tr data-p="' + esc(i.item) + '" data-g="' + esc(g) + '" data-unit="rolls" data-roll="1"><td>' + esc(i.item.replace(/^Big tub lid label – /, '')) + '</td><td style="width:110px"><input data-k="rolls" inputmode="decimal"></td><td style="width:110px"><input data-k="per" inputmode="numeric" value="' + esc(i.perRoll || '') + '"></td><td class="stat" data-t="tot">–</td><td class="muted small">' + esc(lastTxt) + '</td></tr>'
+          : '<tr data-p="' + esc(i.item) + '" data-g="' + esc(g) + '" data-unit="' + esc(i.unit) + '"><td>' + esc(i.item.replace(/^(Small tub lid|Big tub) – /, '')) + '</td><td style="width:140px"><input data-k="qty" inputmode="numeric"></td><td style="width:60px">' + esc(i.unit) + '</td><td class="muted small">' + esc(lastTxt) + '</td></tr>';
+      }).join('') + '</table></div>';
+    }).join('') +
+    '<div class="card"><h2>Something not on the list?</h2><p class="muted small">It\'s added to the list for next time.</p><table class="t" id="g_new"></table><button class="btn soft sm" id="g_addrow" type="button">+ Add another</button></div>' +
+    '<div class="bar"><button class="btn" id="g_save">Save count</button></div>');
+  function addRow() { var tr = document.createElement('tr'); tr.className = 'newpack'; tr.innerHTML = '<td><input placeholder="Item, e.g. Napoli lids" data-k="name"></td><td style="width:120px"><input placeholder="How many" inputmode="decimal" data-k="qty"></td><td style="width:110px"><input placeholder="Unit" data-k="unit" list="dl_pu"></td><td><input placeholder="Group, e.g. Boxes" data-k="group" list="dl_pg"></td>'; $('#g_new').appendChild(tr); }
+  $('#g_new').insertAdjacentHTML('afterend', '<datalist id="dl_pu"><option value="units"><option value="lids"><option value="tubs"><option value="boxes"><option value="rolls"><option value="packs"></datalist><datalist id="dl_pg">' + names.concat(['Boxes', 'Other']).map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>');
+  addRow(); $('#g_addrow').onclick = addRow;
+  $$('tr[data-roll] input').forEach(function (e) { e.oninput = function () { var tr = e.closest('tr'), r = Number(tr.querySelector('[data-k=rolls]').value), p = Number(tr.querySelector('[data-k=per]').value); tr.querySelector('[data-t=tot]').textContent = tr.querySelector('[data-k=rolls]').value !== '' && p ? Math.round(r * p) : '–'; }; });
+  $('#g_save').onclick = function () {
+    if (!val('g_by')) return toast('Who counted?');
+    var counts = [];
+    $$('tr[data-p]').forEach(function (tr) {
+      if (tr.dataset.roll) { var r = num(tr.querySelector('[data-k=rolls]').value), p = num(tr.querySelector('[data-k=per]').value); if (r !== '') counts.push({ item: tr.dataset.p, group: tr.dataset.g, unit: 'labels', rolls: r, perRoll: p, qty: p ? Math.round(r * p) : '' }); }
+      else { var q = num(tr.querySelector('[data-k=qty]').value); if (q !== '') counts.push({ item: tr.dataset.p, group: tr.dataset.g, unit: tr.dataset.unit, qty: q }); }
+    });
+    $$('tr.newpack').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) counts.push({ item: n, group: tr.querySelector('[data-k=group]').value.trim() || 'Other', unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) === '' ? 0 : num(tr.querySelector('[data-k=qty]').value) }); });
+    if (!counts.length) return toast('Nothing counted yet');
+    record('packStock', { id: uid(), date: val('g_date'), by: val('g_by'), counts: counts }, 'Packaging count saved');
+    location.hash = 'home';
+  };
 };
 
 /* ---------- staff hours & pay (passcode; never stored on the device) ---------- */
@@ -813,12 +973,6 @@ function hoursLockTimer() {
 }
 ROUTES.hours = function (month) {
   if (S.user !== owner() && S.user !== manager()) { render(back() + '<div class="card">Only ' + esc(owner()) + ' and ' + esc(manager()) + ' can open staff hours.</div>'); return; }
-  if (S.user === owner() && S.jcode && (!S.hcode || !S.hv)) {
-    if (!navigator.onLine) { render(back() + '<div class="card">Hours & pay needs the internet.</div>'); return; }
-    S.hcode = S.jcode; render(back() + '<p class="muted center">Opening…</p>');
-    hoursCall({ op: 'get', month: month }).then(function (r) { if (!r.ok) { S.hcode = null; toast(r.error || 'Could not open'); location.hash = 'home'; return; } S.hv = r; hoursLockTimer(); drawHours(); }).catch(function () { S.hcode = null; toast('No connection'); });
-    return;
-  }
   if (!S.hcode || !S.hv) {
     render(back() + '<div class="card center" style="max-width:420px;margin:30px auto"><h1>🔒 Hours & pay</h1><p class="muted">Enter your passcode.</p>' +
       '<input id="h_code" type="password" inputmode="numeric" autocomplete="off" style="text-align:center;font-size:26px;letter-spacing:8px;width:200px"><br>' +
