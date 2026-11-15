@@ -128,6 +128,7 @@ function applyLocal(op, data) {
       data.batches = data.batches || [];
       upsertBy(data.batches, 'no', { no: String(d.no), flavour: d.flavour, date: d.date, mix: d.mix, start: d.start, temp: d.temp, hold: d.hold, cool: d.cool, end: d.end, bb: d.bb, pby: d.pby, tub: d.tub, large: d.large, small: d.small, label: d.label ? 'Yes' : '', tby: d.tby, comments: d.comments, status: d.status || (d.tub ? 'Tubbed' : 'Pasteurised'), lines: d.lines });
       var n = parseInt(d.no, 10); if (n && n >= Number(data.settings['Next batch number'] || 0)) data.settings['Next batch number'] = n + 1;
+      if (d.flavour && (data.flavours || []).indexOf(d.flavour) < 0) (data.flavours = data.flavours || []).push(d.flavour);
       break;
     }
     case 'batchStatus': (data.batches || []).forEach(function (b) { if (String(b.no) === String(d.no)) b.status = d.status; }); break;
@@ -251,7 +252,7 @@ ROUTES.batch = function (no) {
   render(back('production', 'Production') + '<h1>' + (isNew ? 'New batch' : 'Batch ' + esc(x.no)) + '</h1>' +
     (draft ? '<div class="hint noprint">Carrying on from where this was left. <a href="#" id="discard">Start again</a></div>' : '') +
     '<div class="card"><h2>Batch</h2><div class="grid2">' +
-    field('Flavour', sel('b_flavour', D().flavours || [], x.flavour, 'Choose a flavour…')) +
+    field('Flavour', sel('b_flavour', (D().flavours || []).concat(x.flavour && (D().flavours || []).indexOf(x.flavour) < 0 ? [x.flavour] : []).concat([{ v: '__other', t: 'Other – new / limited edition…' }]), x.flavour, 'Choose a flavour…')) +
     field('Batch number', inp('b_no', x.no, 'text', isNew ? '' : ' readonly')) +
     field('Date produced', inp('b_date', x.date, 'date')) +
     field('Mix made (litres)', inp('b_mix', x.mix, 'number')) + '</div>' +
@@ -321,7 +322,16 @@ ROUTES.batch = function (no) {
   function dirty() { $('#app').setAttribute('data-dirty', '1'); clearTimeout(tmr); tmr = setTimeout(function () { keepDraft('batch:' + no, gather()); }, 400); }
   drawLines(); check();
   $$('#app input, #app select, #app textarea').forEach(function (e) { if (!e.dataset.i) e.addEventListener('input', function () { dirty(); if (/^b_(temp|hold|cool|end)$/.test(e.id)) check(); }); });
-  $('#b_flavour').onchange = function () { recalc(); dirty(); };
+  $('#b_flavour').onchange = function () {
+    var s = $('#b_flavour');
+    if (s.value === '__other') {
+      var n = (prompt('Name of the new / limited edition flavour') || '').trim();
+      if (!n) { s.value = ''; return; }
+      var o = document.createElement('option'); o.value = n; o.textContent = n; s.insertBefore(o, s.lastChild); s.value = n;
+      toast(n + ' will be added to the flavour list when the batch is saved');
+    }
+    recalc(); dirty();
+  };
   $('#b_mix').onchange = function () { recalc(); dirty(); };
   $('#b_date').onchange = function () { $('#b_bb').value = bestBefore(val('b_date')); dirty(); };
   $('#b_add').onclick = function () { lines.push({ ingredient: '', qty: '', unit: '', batch: '', useBy: '', _manual: true }); drawLines(); };
