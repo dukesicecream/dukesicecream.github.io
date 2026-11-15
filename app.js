@@ -48,6 +48,7 @@ function boot() {
   if (m) { localStorage.setItem(LS.key, m[1]); history.replaceState(null, '', location.pathname + '#home'); }
   S.key = localStorage.getItem(LS.key) || '';
   S.user = localStorage.getItem(LS.user) || '';
+  S.jcode = localStorage.getItem('dk_jcode') || null;
   S.data = load(LS.data, null);
   S.queue = load(LS.queue, []);
   S.drafts = load(LS.drafts, {});
@@ -170,6 +171,8 @@ function route() {
   if (!S.data) { render('<div class="card center"><h2>Getting things ready…</h2><p class="muted">This device needs the internet once to download the lists. After that it works without.</p></div>'); return; }
   var parts = (location.hash || '#home').slice(1).split('/');
   if (parts[0] !== 'hours') { S.hcode = null; S.hv = null; }
+  if (S.user && S.user === owner() && !S.jcode) { S.user = ''; localStorage.removeItem(LS.user); }
+  if (S.user === owner() && S.jcode && !office() && !S.oTimer) ownerIdle();
   if (!S.user && parts[0] !== 'who') { location.hash = 'who'; return; }
   var fn = ROUTES[parts[0]] || ROUTES.home;
   if (parts[0] === 'office' && !office()) fn = ROUTES.home;
@@ -184,8 +187,38 @@ function setupScreen() {
 ROUTES.who = function () {
   render('<h1>Who is using the app?</h1><p class="muted">Tap your name. Everything you record is saved with your name.</p><div class="names">' +
     (D().staff || []).map(function (n) { return '<button data-n="' + esc(n) + '"' + (n === S.user ? ' style="border-color:#1c2140"' : '') + '>' + esc(n) + '</button>'; }).join('') + '</div>');
-  $$('.names button').forEach(function (b) { b.onclick = function () { S.user = b.dataset.n; localStorage.setItem(LS.user, S.user); paintSync(); location.hash = 'home'; }; });
+  $$('.names button').forEach(function (b) { b.onclick = function () {
+    var n = b.dataset.n;
+    if (n === owner()) return ownerSignIn();
+    S.user = n; S.jcode = null; localStorage.setItem(LS.user, S.user); localStorage.removeItem('dk_jcode'); paintSync(); location.hash = 'home';
+  }; });
 };
+// The owner's account is behind his passcode (checked by Google, so it needs the internet)
+function ownerSignIn() {
+  render(back('who', 'Back') + '<div class="card center" style="max-width:420px;margin:30px auto"><h1>🔒 ' + esc(owner()) + '</h1><p class="muted">Enter your passcode.</p>' +
+    '<input id="o_code" type="password" inputmode="numeric" autocomplete="off" style="text-align:center;font-size:26px;letter-spacing:8px;width:200px"><br>' +
+    '<button class="btn" id="o_go" style="margin-top:14px">Sign in</button><p class="muted small">Needs the internet.' + (office() ? ' This device will remember you.' : ' You\'ll be signed out after 15 minutes without use.') + '</p></div>');
+  var go = function () {
+    var c = val('o_code'); if (!c) return toast('Enter the passcode');
+    if (!navigator.onLine) return toast('Signing in as ' + owner() + ' needs the internet');
+    $('#o_go').disabled = true;
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'hours', k: S.key, code: c, op: 'check', by: owner() }) }).then(function (r) { return r.json(); }).then(function (r) {
+      if (!r.ok || r.level !== 'pay') { $('#o_go').disabled = false; $('#o_code').value = ''; return toast(r.error || 'Wrong passcode'); }
+      S.user = owner(); S.jcode = c; localStorage.setItem(LS.user, S.user);
+      if (office()) localStorage.setItem('dk_jcode', c); else localStorage.removeItem('dk_jcode');
+      ownerIdle(); paintSync(); location.hash = 'home';
+    }).catch(function () { $('#o_go').disabled = false; toast('No connection'); });
+  };
+  $('#o_go').onclick = go; $('#o_code').onkeydown = function (e) { if (e.key === 'Enter') go(); };
+  setTimeout(function () { $('#o_code').focus(); }, 50);
+}
+// On shared tablets the owner is signed out after 15 minutes without use
+function ownerIdle() {
+  if (office()) return;
+  clearTimeout(S.oTimer);
+  S.oTimer = setTimeout(function () { if (S.user === owner() && !office()) { S.user = ''; S.jcode = null; localStorage.removeItem(LS.user); toast('Signed out'); location.hash = 'who'; route(); } }, 15 * 60 * 1000);
+  if (!S.oWatch) { S.oWatch = true; ['click', 'keydown', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, function () { if (S.user === owner()) ownerIdle(); }, true); }); }
+}
 
 ROUTES.home = function () {
   var due = (D().due || []).filter(function (x) { return !x.hidden; });
@@ -202,19 +235,32 @@ ROUTES.home = function () {
     ['pest', '🐭', 'Pest control', 'Monthly check'],
     ['messages', '✉️', 'Messages', 'Notes & reminders'],
     ['recipes', '📖', 'Recipes', 'Base mix & flavours'],
-    ['records', '🖨️', 'Records', 'View & print'],
-    ['hours', '🔒', 'Hours & pay', 'Passcode needed']
+    ['records', '🖨️', 'Records', 'View & print']
   ];
+  if (S.user === owner()) tiles.push(['hours', '💷', 'Hours & pay', 'Staff hours and pay']);
+  else if (S.user === manager()) tiles.push(['hours', '🔒', 'Staff hours', 'Passcode needed']);
   if (office()) tiles.unshift(['office', '📊', 'Office', 'Stock, orders & cream', true]);
   var unsent = S.queue.length;
   render('<h1>Hello ' + esc(S.user.split(' ')[0]) + '</h1>' +
     (unsent && !navigator.onLine ? '<div class="due"><span>📶</span><span>' + unsent + ' record' + (unsent > 1 ? 's are' : ' is') + ' saved on this device and will send when there\'s internet.</span></div>' : '') +
+    myMessages().map(function (m) { return '<div class="due" style="background:#eef0f8;border-color:#c9cde3;color:#1c2140"><span>✉️</span><span style="flex:1"><b>' + esc(m.from) + (m.to === 'Everyone' ? ' (to everyone)' : '') + ':</b> ' + esc(m.text) + ' <span class="muted small">' + esc(short(m.remind || m.date)) + '</span></span><button class="btn soft sm" data-seen="' + esc(m.id) + '">✓ Seen</button></div>'; }).join('') +
     due.map(function (x) { return '<a class="due" href="#' + (links[x.key] || 'home') + '"><span>⏰</span><span>' + esc(x.text) + '</span></a>'; }).join('') +
     '<div class="tiles" style="margin-top:14px">' + tiles.map(function (t) {
       return '<a class="tile' + (t[4] ? ' dark' : '') + '" href="#' + t[0] + '"><span class="ic">' + t[1] + '</span><span><b>' + esc(t[2]) + '</b><br><small>' + esc(t[3]) + '</small></span></a>';
     }).join('') + '</div>' +
     '<p class="muted center" style="margin-top:28px">Last updated from Google: ' + (D().at ? new Date(D().at).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'never') + '</p>');
+  $$('[data-seen]').forEach(function (b) { b.onclick = function () { var s = load('dk_seen', []); s.push(b.dataset.seen); save('dk_seen', s.slice(-200)); route(); }; });
 };
+// Notes for the person using the app: to them by first name, to Both (Jonny & Paul) or to Everyone, from the last 14 days
+function myMessages() {
+  var first = (S.user || '').split(' ')[0].toLowerCase(), seen = load('dk_seen', []), t = today(), from = addDays(t, -14);
+  var boss = S.user === owner() || S.user === manager();
+  return (D().messages || []).filter(function (m) {
+    var to = String(m.to || '').toLowerCase(), when = m.remind || m.date;
+    var mine = to === 'everyone' || to === first || (boss && /both|all/.test(to));
+    return mine && seen.indexOf(m.id) < 0 && when <= t && when >= from && String(m.from || '').toLowerCase() !== (S.user || '').toLowerCase();
+  }).slice(-6).reverse();
+}
 
 /* ---------- production: batch records ---------- */
 function lotsFor(name) {
@@ -222,14 +268,20 @@ function lotsFor(name) {
   return (D().lots || []).filter(function (l) { return l.status !== 'Finished' && String(l.item || '').toLowerCase() === n; })
     .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
 }
+function isDairy(n) { return /milk|cream/i.test(n) && !/powder/i.test(n); }
+function rq(n, q) { return q === '' || q == null || isNaN(Number(q)) ? q : isDairy(n) ? Math.round(Number(q)) : r2(Number(q), 3); }
+function inBase(q, u) { u = String(u || '').toLowerCase(); q = Number(q) || 0; return u === 'g' || u === 'ml' ? q / 1000 : q; }
+function byAmount(a, b) { return inBase(b.qty != null ? b.qty : b.amount, b.unit) - inBase(a.qty != null ? a.qty : a.amount, a.unit); }
+function owner() { return set('Owner name') || 'Jonny Campbell'; }
+function manager() { return set('Hours manager name') || 'Paul Stewart'; }
 function usesBase(f) { var i = (D().flavourInfo || []).find(function (x) { return x.name === f; }); return !i || i.base; }
 function recipeLines(flavour, mix) {
   var base = setN('Base mix litres', 58), f = mix ? Number(mix) / base : 0;
   var wb = usesBase(flavour);
   return (D().recipe || []).filter(function (r) { return (wb && r.flavour === 'All flavours (base mix)') || r.flavour === flavour; }).map(function (r) {
     var lot = lotsFor(r.ingredient)[0];
-    return { ingredient: r.ingredient, qty: f ? r2(r.amount * f, 3) : '', unit: r.unit, batch: lot ? lot.batch : '', useBy: lot ? lot.useBy : '' };
-  });
+    return { ingredient: r.ingredient, qty: f ? rq(r.ingredient, r.amount * f) : '', unit: r.unit, batch: lot ? lot.batch : '', useBy: lot ? lot.useBy : '' };
+  }).sort(byAmount);
 }
 ROUTES.production = function () {
   var bs = (D().batches || []).slice().sort(function (a, b) { return Number(b.no) - Number(a.no); });
@@ -628,7 +680,7 @@ ROUTES.packing = function (no) {
 ROUTES.messages = function () {
   var msgs = (D().messages || []).slice().reverse();
   render(back() + '<h1>Messages & reminders</h1><div class="card"><h2>New message</h2>' +
-    '<div class="grid2">' + field('To', sel('m_to', ['Jonny', 'Paul', 'Both'], S.user.indexOf('Jonny') === 0 ? 'Paul' : 'Jonny')) +
+    '<div class="grid2">' + field('To', sel('m_to', [{ v: 'Jonny', t: 'Jonny' }, { v: 'Paul', t: 'Paul' }, { v: 'Both', t: 'Jonny & Paul' }, { v: 'Everyone', t: 'Everyone (shows on everyone\'s home screen)' }], S.user.indexOf('Jonny') === 0 ? 'Paul' : 'Jonny')) +
     field('Send it on (leave empty to send now)', inp('m_when', '', 'date')) + '</div>' +
     field('Message', '<textarea id="m_text" placeholder="e.g. Running low on large tubs – order more"></textarea>') +
     '<button class="btn" id="m_send">Send</button></div>' +
@@ -649,7 +701,7 @@ ROUTES.recipes = function (f) {
   var flavours = [BASE].concat((D().flavours || []).filter(function (x) { return ltd.indexOf(x) < 0; }));
   f = f || BASE;
   var wb = f === BASE || usesBase(f);
-  var lines = (D().recipe || []).filter(function (r) { return r.flavour === f; }).map(function (r) { return Object.assign({}, r); });
+  var lines = (D().recipe || []).filter(function (r) { return r.flavour === f; }).map(function (r) { return Object.assign({}, r, { amount: rq(r.ingredient, r.amount) }); }).sort(byAmount);
   if (!lines.length) lines.push({ ingredient: '', amount: '', unit: 'kg' });
   var base = setN('Base mix litres', 58);
   var chip = function (x) { return '<a class="chip' + (x === f ? ' on' : '') + '" href="#recipes/' + encodeURIComponent(x) + '">' + esc(x === BASE ? 'Base mix' : x) + '</a>'; };
@@ -671,7 +723,7 @@ ROUTES.recipes = function (f) {
   function scale() {
     var L = Number(val('r_l')) || base, k = L / base;
     var all = f === BASE || !wb ? lines : (D().recipe || []).filter(function (r) { return r.flavour === BASE; }).concat(lines);
-    $('#r_scaled').innerHTML = '<table class="t">' + all.filter(function (l) { return l.ingredient; }).map(function (l) { return '<tr><td>' + esc(l.ingredient) + '</td><td><b>' + r2(Number(l.amount) * k, 3) + '</b> ' + esc(l.unit) + '</td></tr>'; }).join('') + '</table>';
+    $('#r_scaled').innerHTML = '<table class="t">' + all.filter(function (l) { return l.ingredient; }).map(function (l) { return { ingredient: l.ingredient, qty: rq(l.ingredient, Number(l.amount) * k), unit: l.unit }; }).sort(byAmount).map(function (l) { return '<tr><td>' + esc(l.ingredient) + '</td><td><b>' + l.qty + '</b> ' + esc(l.unit) + '</td></tr>'; }).join('') + '</table>';
   }
   draw(); $('#r_l').oninput = scale;
   $('#r_newltd').onclick = function (ev) { ev.preventDefault(); var n = (prompt('Name of the new limited edition flavour') || '').trim(); if (n) location.hash = 'recipes/' + encodeURIComponent(n); };
@@ -752,7 +804,7 @@ ROUTES.office = function () {
 
 /* ---------- staff hours & pay (passcode; never stored on the device) ---------- */
 function hoursCall(body) {
-  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'hours', k: S.key, code: S.hcode }, body)) }).then(function (r) { return r.json(); });
+  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'hours', k: S.key, code: S.hcode, by: S.user }, body)) }).then(function (r) { return r.json(); });
 }
 function hoursLockTimer() {
   clearTimeout(S.hTimer);
@@ -760,6 +812,13 @@ function hoursLockTimer() {
   if (!S.hWatch) { S.hWatch = true; ['click', 'keydown', 'input', 'touchstart', 'scroll'].forEach(function (ev) { document.addEventListener(ev, function () { if (S.hcode && (location.hash || '').indexOf('#hours') === 0) hoursLockTimer(); }, true); }); }
 }
 ROUTES.hours = function (month) {
+  if (S.user !== owner() && S.user !== manager()) { render(back() + '<div class="card">Only ' + esc(owner()) + ' and ' + esc(manager()) + ' can open staff hours.</div>'); return; }
+  if (S.user === owner() && S.jcode && (!S.hcode || !S.hv)) {
+    if (!navigator.onLine) { render(back() + '<div class="card">Hours & pay needs the internet.</div>'); return; }
+    S.hcode = S.jcode; render(back() + '<p class="muted center">Opening…</p>');
+    hoursCall({ op: 'get', month: month }).then(function (r) { if (!r.ok) { S.hcode = null; toast(r.error || 'Could not open'); location.hash = 'home'; return; } S.hv = r; hoursLockTimer(); drawHours(); }).catch(function () { S.hcode = null; toast('No connection'); });
+    return;
+  }
   if (!S.hcode || !S.hv) {
     render(back() + '<div class="card center" style="max-width:420px;margin:30px auto"><h1>🔒 Hours & pay</h1><p class="muted">Enter your passcode.</p>' +
       '<input id="h_code" type="password" inputmode="numeric" autocomplete="off" style="text-align:center;font-size:26px;letter-spacing:8px;width:200px"><br>' +
