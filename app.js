@@ -401,7 +401,8 @@ ROUTES.batch = function (no) {
   if (b && b.trimmed) return render(back('production', 'Production') + '<h1>Batch ' + esc(b.no) + '</h1><div class="card"><p><b>' + esc(b.flavour) + '</b> · made ' + esc(nice(b.date)) + (b.tub ? ' · tubbed ' + esc(nice(b.tub)) : '') + '</p><p class="muted">This batch is more than 2 weeks old, so its full record is kept on the office computer and in the Google Sheet, not on this device.</p></div>');
   var draft = S.drafts['batch:' + no];
   var plan = D().creamPlan, planMix = plan && plan.week && plan.week >= addDays(monday(today()), -7) ? plan.mix : '';
-  var x = draft || b || { no: String(set('Next batch number') || ''), flavour: '', date: today(), mix: planMix || setN('Base mix litres', 58), start: '', temp: '', hold: '', cool: '', end: '', bb: '', pby: S.user, tub: '', large: '', small: '', label: '', tby: '', comments: '', lines: null };
+  var planFl = planMix && plan.plan && plan.plan.flavour && (D().flavours || []).indexOf(plan.plan.flavour) >= 0 ? plan.plan.flavour : '';
+  var x = draft || b || { no: String(set('Next batch number') || ''), flavour: planFl, date: today(), mix: planMix || setN('Base mix litres', 58), start: '', temp: '', hold: '', cool: '', end: '', bb: '', pby: S.user, tub: '', large: '', small: '', label: '', tby: '', comments: '', lines: null };
   var lines = (x.lines && x.lines.length) ? x.lines.map(function (l) { return Object.assign({}, l); }) : recipeLines(x.flavour, x.mix);
   // tub counts: stored as how they were counted; older records only have the totals
   var tc = x.tc || { sLoose: x.small === '' || x.small == null ? '' : x.small, lOdd: x.large === '' || x.large == null ? '' : x.large, nOdd: x.napolis === '' || x.napolis == null ? '' : x.napolis };
@@ -412,6 +413,7 @@ ROUTES.batch = function (no) {
   var dl = {};
   render(back('production', 'Production') + '<h1>' + (isNew ? 'New batch' : 'Batch ' + esc(x.no)) + '</h1>' +
     (draft ? '<div class="hint noprint">Carrying on from where this was left. <a href="#" id="discard">Start again</a></div>' : '') +
+    (isNew && !draft && planMix ? '<div class="hint noprint">Filled in from this week\'s batch plan (' + esc(planMix) + ' L' + (planFl ? ', ' + esc(planFl) : '') + '). Ingredient batch numbers come from the deliveries – check them and fill in the pasteurisation.</div>' : '') +
     '<div class="card"><h2>Batch</h2><div class="grid2">' +
     field('Flavour', sel('b_flavour', (D().flavours || []).concat(x.flavour && (D().flavours || []).indexOf(x.flavour) < 0 ? [x.flavour] : []).concat([{ v: '__other', t: 'Other – new / limited edition…' }]), x.flavour, 'Choose a flavour…')) +
     field('Batch number', inp('b_no', x.no, 'text', isNew ? '' : ' readonly')) +
@@ -420,7 +422,7 @@ ROUTES.batch = function (no) {
     '<h3>Ingredients</h3><p class="muted small">Amounts are worked out from the recipe for the litres above. Batch numbers are filled in from deliveries (oldest first) – change anything that\'s different.</p>' +
     '<div class="scroll"><table class="t" id="b_lines"></table></div><button class="btn soft sm" id="b_add" type="button">+ Add ingredient</button> <button class="btn soft sm" id="b_recalc" type="button">Recalculate from recipe</button></div>' +
     '<div class="card"><h2>Pasteurisation</h2><div class="grid3">' +
-    field('Start time', inp('b_start', x.start, 'time')) +
+    field('Start time', '<span style="display:flex;gap:6px">' + inp('b_start', x.start, 'time') + '<button class="btn soft sm noprint" type="button" id="b_startnow">Now</button></span>') +
     field('Temperature reached °C (at least ' + setN('Pasteurisation minimum °C', 65) + ')', inp('b_temp', x.temp, 'number')) +
     field('Held for, minutes (at least ' + setN('Pasteurisation minimum hold (mins)', 30) + ')', inp('b_hold', x.hold, 'number')) +
     field('Cooling time, minutes (' + setN('Cooling maximum (mins)', 60) + ' or less)', inp('b_cool', x.cool, 'number')) +
@@ -505,6 +507,7 @@ ROUTES.batch = function (no) {
   $('#b_add').onclick = function () { lines.push({ ingredient: '', qty: '', unit: '', batch: '', useBy: '', _manual: true }); drawLines(); };
   $('#b_recalc').onclick = function () { recalc(); dirty(); };
   ['b_strays', 'b_sloose', 'b_lhigh', 'b_lstacks', 'b_lodd', 'b_nhigh', 'b_nstacks', 'b_nodd'].forEach(function (id) { $('#' + id).addEventListener('input', showTubs); }); showTubs();
+  $('#b_startnow').onclick = function () { var d = new Date(); $('#b_start').value = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); dirty(); };
   $('#b_tubnow').onclick = function () { $('#b_tub').value = today(); if (!val('b_tby')) $('#b_tby').value = S.user; dirty(); };
   if ($('#discard')) $('#discard').onclick = function (ev) { ev.preventDefault(); dropDraft('batch:' + no); route(); };
   $('#b_save').onclick = function () {
@@ -524,6 +527,19 @@ ROUTES.batch = function (no) {
     else location.hash = 'production';
   };
 };
+
+/* ---------- after saving a record, open the next one that's due ---------- */
+var NEXT = [['temps', 'temps', 'Temperature sheet'], ['pest', 'pest', 'Pest control check'], ['stock', 'stock', 'Ice cream stock take'], ['pack', 'packing', 'Shop orders to pack']];
+function goNext(doneKey) {
+  S.doneKeys = S.doneKeys || {};
+  if (doneKey) { S.doneKeys[doneKey] = today(); if (S.data && S.data.due) S.data.due = S.data.due.filter(function (x) { return x.key !== doneKey; }); }
+  var due = (D().due || []).filter(function (x) { return !x.hidden; }).map(function (x) { return x.key; });
+  var n = NEXT.find(function (o) { return o[0] !== doneKey && due.indexOf(o[0]) >= 0 && S.doneKeys[o[0]] !== today(); });
+  if (!n) { location.hash = 'home'; return; }
+  location.hash = n[1];
+  setTimeout(function () { toast('Next: ' + n[2]); }, 1600);
+}
+function initials(name) { return String(name || '').split(/\s+/).filter(Boolean).map(function (w) { return w[0].toUpperCase(); }).join(''); }
 
 /* ---------- cleaning (comes up after a production day) ---------- */
 function dueFlag(k) { var x = (D().due || []).find(function (d) { return d.key === k; }); return x ? !!x.value : false; }
@@ -546,7 +562,8 @@ ROUTES.cleaning = function (list, batch) {
       var n = Object.keys(c.items || {}), done = n.filter(function (k) { return c.items[k]; }).length;
       return '<div class="row"><span>' + esc(nice(c.date)) + ' · ' + esc(c.list) + (c.batch ? ' · batch ' + esc(c.batch) : '') + '<br><span class="muted">' + esc(c.by) + (c.comments ? ' – ' + esc(c.comments) : '') + '</span></span><span class="pill' + (done === n.length ? ' ok' : ' warn') + '">' + done + '/' + n.length + '</span></div>';
     }).join('') || '<p class="muted">Nothing recorded yet.</p>') + '</div>' +
-    '<div class="bar"><button class="btn" id="c_save">Confirm cleaning</button></div>');
+    '<div class="bar"><button class="btn soft" type="button" id="c_all">Tick all</button><button class="btn" id="c_save">Confirm cleaning</button></div>');
+  $('#c_all').onclick = function () { $$('[data-l]').forEach(function (e) { e.checked = true; }); };
   $('#c_save').onclick = function () {
     var com = val('c_com');
     var undone = $$('[data-l]').filter(function (e) { return !e.checked; });
@@ -556,7 +573,7 @@ ROUTES.cleaning = function (list, batch) {
       var its = {}; $$('[data-l="' + l + '"]').forEach(function (e) { its[e.dataset.it] = e.checked; });
       record('cleaning', { id: uid(), date: val('c_date'), list: l, by: val('c_by'), comments: com, batch: batch || '', items: its }, 'Cleaning confirmed');
     });
-    location.hash = batch ? 'production' : 'home';
+    goNext('cleaning');
   };
 };
 
@@ -582,13 +599,15 @@ ROUTES.temps = function (wk) {
     }).join('') + '</table></div>' +
     '<div class="bar"><button class="btn" id="t_save">Save week</button></div>');
   function mark(e) { var u = units.find(function (x) { return x.name === e.dataset.u; }); var v = num(e.value); var td = e.parentNode; td.classList.toggle('bad', !!(u && v !== '' && (v < u.lo || v > u.hi))); }
-  $$('input[data-u]').forEach(function (e) { e.onfocus = function () { focus = e; }; e.oninput = function () { mark(e); $('#app').setAttribute('data-dirty', '1'); }; mark(e); });
+  // initials fill themselves in for any day that has a reading (change them if someone else did the check)
+  function autoIni(e) { var i = $('input[data-k=initials][data-d="' + e.dataset.d + '"]'); if (i && !i.value && e.value !== '') i.value = initials(S.user); }
+  $$('input[data-u]').forEach(function (e) { e.onfocus = function () { focus = e; }; e.oninput = function () { mark(e); autoIni(e); $('#app').setAttribute('data-dirty', '1'); }; mark(e); });
   $$('.chip[data-q]').forEach(function (c) {
     c.onmousedown = function (ev) { ev.preventDefault(); };
     c.onclick = function () {
       var target = focus && focus.dataset.u === c.dataset.u ? focus : $$('input[data-u="' + c.dataset.u + '"]').find(function (e) { return e.value === ''; });
       if (!target) return;
-      target.value = c.dataset.q; mark(target); $('#app').setAttribute('data-dirty', '1');
+      target.value = c.dataset.q; mark(target); autoIni(target); $('#app').setAttribute('data-dirty', '1');
       var next = $('input[data-r="' + (Number(target.dataset.r) + 1) + '"][data-c="' + target.dataset.c + '"]');
       if (next) { next.focus(); focus = next; } else target.blur();
     };
@@ -602,26 +621,35 @@ ROUTES.temps = function (wk) {
     var bad = $$('td.bad input').filter(function (e) { var a = $('input[data-k=action][data-d="' + e.dataset.d + '"]').value.trim(); return !a; });
     record('temps', { days: out }, bad.length ? 'Saved – ' + bad.length + ' reading(s) out of range with no action written' : 'Temperatures saved');
     $('#app').removeAttribute('data-dirty');
-    location.hash = 'home';
+    goNext('temps');
   };
 };
 
 /* ---------- pest control ---------- */
 ROUTES.pest = function () {
   var list = (D().pest || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+  var checks = ['All bait points / traps checked', 'No droppings, gnawing or other signs of pests', 'No damage to stock or packaging', 'Doors, screens and proofing in good order', 'Bins and outside area clean'];
+  var lastP = list[0] || {};
   render(back() + '<h1>Pest control</h1><div class="card"><h2>Monthly check</h2><div class="grid2">' +
     field('Date', inp('p_date', today(), 'date')) + field('Checked by (name or pest control company)', inp('p_by', S.user)) + '</div>' +
-    field('Any signs or issues found?', '<textarea id="p_issues" placeholder="e.g. None – all bait points checked"></textarea>') +
-    field('Action taken', '<textarea id="p_action"></textarea>') +
-    '<div class="grid2">' + field('Verified by', staffSel('p_ver', '')) + field('Notes / report reference', inp('p_notes', '')) + '</div>' +
+    '<p class="muted small">Everything is ticked – untick anything that isn\'t right and say what was found.</p>' +
+    checks.map(function (c, i) { return '<label class="tick"><input type="checkbox" checked data-pc="' + i + '"> ' + esc(c) + '</label>'; }).join('') +
+    '<div id="p_more" style="display:none">' + field('What was found?', '<textarea id="p_issues"></textarea>') +
+    field('Action taken', '<textarea id="p_action"></textarea>') + '</div>' +
+    '<div class="grid2">' + field('Verified by', staffSel('p_ver', '')) + field('Notes / report reference', inp('p_notes', lastP.notes && /contract|ref|company/i.test(lastP.notes) ? lastP.notes : '')) + '</div>' +
     '<button class="btn" id="p_save">Save check</button></div>' +
     '<div class="card"><h2>Previous checks</h2>' + (list.map(function (p) {
       return '<div class="row"><span><b>' + esc(nice(p.date)) + '</b> · ' + esc(p.by) + '<br><span class="muted">' + esc(p.issues || 'No issues noted') + (p.action ? ' – ' + esc(p.action) : '') + '</span></span><span class="muted small">' + esc(p.verified || '') + '</span></div>';
     }).join('') || '<p class="muted">None yet.</p>') + '</div>');
+  var showMore = function () { var bad = $$('[data-pc]').some(function (e) { return !e.checked; }); $('#p_more').style.display = bad ? '' : 'none'; if (bad) $('#p_issues').style.background = val('p_issues') ? '' : '#fff4d6'; };
+  $$('[data-pc]').forEach(function (e) { e.onchange = showMore; });
   $('#p_save').onclick = function () {
-    if (!val('p_by')) return toast('Who did the check?');
-    record('pest', { id: uid(), date: val('p_date'), by: val('p_by'), issues: val('p_issues') || 'None', action: val('p_action'), verified: val('p_ver'), notes: val('p_notes') }, 'Pest control check saved');
-    route();
+    if (!val('p_by')) $('#p_by').value = S.user;
+    var notOk = $$('[data-pc]').filter(function (e) { return !e.checked; }).map(function (e) { return checks[Number(e.dataset.pc)]; });
+    var issues = notOk.length ? 'Not OK: ' + notOk.join('; ') + (val('p_issues') ? ' – ' + val('p_issues') : '') : 'None – ' + checks.join(', ').toLowerCase();
+    record('pest', { id: uid(), date: val('p_date'), by: val('p_by'), issues: issues, action: notOk.length ? val('p_action') : 'None needed', verified: val('p_ver'), notes: val('p_notes') },
+      notOk.length && !val('p_issues') ? 'Saved – please add what was found when you can' : 'Pest control check saved');
+    goNext('pest');
   };
 };
 
@@ -631,7 +659,17 @@ ROUTES.deliveries = function () {
   var suppliers = Array.from(new Set(ings.map(function (i) { return i.supplier; }).concat((D().lots || []).map(function (l) { return l.supplier; })).filter(Boolean))).sort();
   var keep = S.drafts.delivery || { date: today(), supplier: '' };
   var open = (D().lots || []).filter(function (l) { return l.status !== 'Finished'; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
-  render(back() + '<h1>Deliveries in</h1><div class="card"><h2>Record a delivery</h2>' +
+  // the cream & milk ordered from Strathroy is filled in ready – just add the temperatures, batch numbers and use-by dates
+  var cp = D().creamPlan, pl = cp && cp.plan, exp = null;
+  if (pl && cp.delivery && cp.delivery <= today() && cp.delivery >= addDays(today(), -6)) {
+    var got = (D().lots || []).some(function (l) { return l.date >= cp.delivery && /cream/i.test(l.item); });
+    if (!got) exp = [['Whipping Cream', (pl.creamPacks || 0) * setN('Cream pack litres', 4)], ['Whole Milk', pl.milkL]].filter(function (r) { return r[1] > 0; });
+  }
+  var expHtml = exp && exp.length ? '<div class="card" style="border:2px solid #1c2140"><h2>🥛 Strathroy delivery – ' + esc(nice(cp.delivery)) + '</h2><p class="muted small">Filled in from this week\'s order (milk is what the recipe needs – any extra jars are for home). Add the temperature (5 °C or below), batch number and use by, tick and save.</p>' +
+    '<div class="scroll"><table class="t"><tr><th>Item</th><th>Litres</th><th>Temp °C</th><th>Batch no</th><th>Use by</th><th>OK</th></tr>' + exp.map(function (r, i) {
+      return '<tr data-ex="' + i + '"><td><b>' + esc(r[0]) + '</b></td><td><input data-k="qty" inputmode="decimal" style="width:70px" value="' + esc(Math.round(r[1] * 100) / 100) + '"></td><td><input data-k="temp" inputmode="decimal" style="width:70px"></td><td><input data-k="batch" style="width:110px"></td><td><input data-k="use" type="date"></td><td><input type="checkbox" data-k="ok" checked style="width:22px;height:22px"></td></tr>';
+    }).join('') + '</table></div><button class="btn" id="d_exsave">Save Strathroy delivery</button></div>' : '';
+  render(back() + '<h1>Deliveries in</h1>' + expHtml + '<div class="card"><h2>Record a delivery</h2>' +
     '<p class="muted small">One line per item. Milk and cream: take the temperature (5 °C or below).</p><div class="grid3">' +
     field('Date received', inp('d_date', keep.date, 'date')) +
     field('Item', inp('d_item', '', 'text', ' list="dl_ings" autocomplete="off"') + '<datalist id="dl_ings">' + ings.map(function (i) { return '<option value="' + esc(i.name) + '">'; }).join('') + '</datalist>') +
@@ -666,6 +704,18 @@ ROUTES.deliveries = function () {
     route(); setTimeout(function () { $('#d_item').focus(); }, 50);
   };
   $$('[data-fin]').forEach(function (b) { b.onclick = function () { record('lotStatus', { id: b.dataset.fin, status: 'Finished' }, 'Marked as used up'); route(); }; });
+  if ($('#d_exsave')) $('#d_exsave').onclick = function () {
+    var rows = $$('tr[data-ex]'), warm = [];
+    rows.forEach(function (tr) {
+      var g = function (k) { return tr.querySelector('[data-k=' + k + ']'); }, it = exp[Number(tr.dataset.ex)][0], t = num(g('temp').value);
+      if (t !== '' && t > 5) warm.push(it);
+      record('delivery', { id: uid(), date: cp.delivery, item: it, supplier: 'Strathroy', qty: num(g('qty').value), unit: 'L', useBy: g('use').value, temp: t, batch: g('batch').value.trim(), comment: g('ok').checked ? 'Received in good condition' : 'NOT OK – see Jonny', by: S.user }, it + ' saved');
+    });
+    toast('Strathroy delivery saved' + (warm.length ? ' – ' + warm.join(' & ') + ' above 5 °C, Jonny will be told' : '') + (rows.some(function (tr) { return tr.querySelector('[data-k=temp]').value === ''; }) ? ' (temperature missing on one line)' : ''));
+    goNext(null);
+  };
+  // remembers the last unit and quantity for an item
+  $('#d_item').addEventListener('change', function () { var l = (D().lots || []).filter(function (x) { return String(x.item).toLowerCase() === val('d_item').toLowerCase(); }).pop(); if (l) { if (!val('d_unit') && l.unit) $('#d_unit').value = l.unit; if (!val('d_qty') && l.qty !== '' && l.qty != null) $('#d_qty').placeholder = 'last time ' + l.qty; } });
 };
 
 /* ---------- ice cream stock take ---------- */
@@ -722,7 +772,7 @@ ROUTES.stock = function () {
     counted.forEach(function (r) { delete r.any; });
     var by = val('s_by') || S.user, skipped = rows.length - counted.length;
     record('iceStock', { id: val('s_date') === t && todayId ? todayId : uid(), date: val('s_date'), by: by, counts: counted }, 'Stock take saved' + (skipped ? ' – ' + skipped + ' flavour' + (skipped > 1 ? 's' : '') + ' not counted' : ''));
-    $('#app').removeAttribute('data-dirty'); location.hash = 'home';
+    $('#app').removeAttribute('data-dirty'); goNext('stock');
   };
 };
 
@@ -799,7 +849,7 @@ ROUTES.ingstock = function () {
     var notC = $$('tr[data-ing]').length - counts.filter(function (c) { return !c.supplier && c.category === undefined; }).length;
     counts.forEach(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }); if (g) { if (c.packType) g.packType = c.packType; if (c.packSize !== '') g.packSize = c.packSize; if (c.packSize !== '') g.countUnit = c.sizeUnit; } });
     record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by') || S.user, counts: counts }, 'Count saved' + (notC > 0 ? ' – ' + notC + ' item' + (notC > 1 ? 's' : '') + ' not counted' : ''));
-    location.hash = 'home';
+    goNext(null);
   };
 };
 
@@ -1073,9 +1123,29 @@ ROUTES.weddings = function (key) {
         '<button class="btn" id="w_save">Confirm</button></div>';
     }
     var recs = mine ? (v.records || []) : [];
-    render(back() + '<h1>Weddings</h1><p class="muted">Record the tubs going out to a wedding, then the tubs coming back. Flavours don\'t matter here.</p>' +
-      '<div class="card">' + field('Wedding', sel('w_pick', opts.concat([{ v: '__other', t: 'Other – not on the list…' }]), key || '', list.length ? 'Choose the wedding…' : (navigator.onLine ? 'Nothing waiting – choose Other' : 'No internet – choose Other'))) + '</div>' +
-      form +
+    // every upcoming wedding from the booking system (prices only for Jonny)
+    var up = v.upcoming || [], keys = list.map(function (x) { return x.key; });
+    var when = function (n) { return n === 0 ? 'today' : n === 1 ? 'tomorrow' : 'in ' + n + ' days'; };
+    var line = function (k, t) { return t ? '<div class="small" style="margin:3px 0"><span class="muted">' + k + ':</span> ' + t + '</div>' : ''; };
+    var ghost = 'btn soft sm';
+    var upHtml = '<div class="card"><h2>Upcoming weddings</h2>' + (mine && v.sheetUrl ? '<p class="small"><a href="' + esc(v.sheetUrl) + '" target="_blank">Open the Bookings sheet ↗</a></p>' : '') +
+      (up.length ? up.map(function (w) {
+        var tasting = w.tasting === 'Done' ? 'Done' : w.tasting === 'Booked' ? 'Booked – ' + esc(w.slot) : w.tasting === 'Invited' ? 'Invited, no time picked yet' : (w.status === 'Confirmed' ? '<b>Not invited yet</b>' : '');
+        var k = w.date + '|' + w.name, maps = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent((w.venue ? w.venue + ', ' : '') + w.address);
+        return '<details style="padding:10px 0;border-bottom:1px solid #eee"' + (w.days <= 7 ? ' open' : '') + '><summary style="cursor:pointer"><b>' + esc(nice(w.date)) + '</b> · ' + esc(w.name) + ' <span class="muted small">(' + when(w.days) + ')</span> <span class="pill ' + (w.status === 'Confirmed' ? 'ok' : 'warn') + '">' + esc(w.status) + '</span>' +
+          '<br><span class="muted small">' + esc(w.venue || 'Venue?') + (w.serve ? ' · from ' + esc(w.serve) : '') + ' · ' + w.guests + ' guests' + (w.finalGuests ? ' (final)' : '') + '</span></summary><div style="margin:8px 0 0 4px">' +
+          line('Venue', esc(w.venue) + (w.address ? ', ' + esc(w.address) : '')) + line('Serving', (w.serve ? 'from ' + esc(w.serve) : '') + (w.hours ? ' for ' + esc(w.hours) + ' hours' : '') + (w.inout ? ' · ' + esc(w.inout) : '')) +
+          line('Guests', w.guests + (w.finalGuests ? ' (final numbers in)' : ' (not final yet)')) + line('Flavours', w.flavours.length ? esc(w.flavours.join(', ')) : 'not chosen yet') + line('Tasting', tasting) +
+          line('Their request', w.request ? '<i>' + esc(w.request) + '</i>' + (w.requestStatus ? ' – ' + esc(w.requestStatus.toLowerCase()) : '') : '') +
+          (mine && w.price !== '' && w.price != null ? line('Price', gbp(w.price) + (w.balance !== '' && w.balance != null ? ' · balance ' + gbp(w.balance) + ' cash' : '')) : '') +
+          (w.venueNotes ? '<div style="background:#fff4d6;border:2px solid #b58a00;border-radius:8px;padding:8px 10px;margin:6px 0" class="small"><b>📍 Venue notes:</b> ' + esc(w.venueNotes).replace(/\n/g, '<br>') + '</div>' : '') +
+          (w.tastingNotes ? '<details class="small"><summary>Tasting notes</summary><div style="white-space:pre-wrap">' + esc(w.tastingNotes) + '</div></details>' : '') +
+          '<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">' + (w.phone ? '<a class="' + ghost + '" href="tel:' + esc(w.phone.replace(/[^\d+]/g, '')) + '">📞 Call</a>' : '') + (w.email ? '<a class="' + ghost + '" href="mailto:' + esc(w.email) + '">✉️ Email</a>' : '') +
+          (w.address || w.venue ? '<a class="' + ghost + '" target="_blank" href="' + esc(maps) + '">🗺️ Directions</a>' : '') + (keys.indexOf(k) >= 0 ? '<a class="btn sm" href="#weddings/' + encodeURIComponent(k) + '">🍦 Tubs out / in</a>' : '') + '</div></div></details>';
+      }).join('') : '<p class="muted">' + (navigator.onLine ? 'No upcoming weddings in the booking system.' : 'Needs the internet.') + '</p>') + '</div>';
+    render(back() + '<h1>Weddings</h1><p class="muted">Upcoming weddings are listed below – tap one for the details. Record the tubs going out to a wedding, then the tubs coming back.</p>' +
+      '<div class="card"><h2>🍦 Tubs out / in</h2>' + field('Wedding', sel('w_pick', opts.concat([{ v: '__other', t: 'Other – not on the list…' }]), key || '', list.length ? 'Choose the wedding…' : (navigator.onLine ? 'Nothing waiting – choose Other' : 'No internet – choose Other'))) + '</div>' +
+      form + upHtml +
       (mine ? '<div class="card"><h2>Recent weddings</h2><p class="muted small">Only you see this.</p><div class="scroll"><table class="t"><tr><th>Date</th><th>Wedding</th><th>Out</th><th>In</th><th>Used</th><th>By</th></tr>' +
         (recs.map(function (r) { return '<tr><td>' + esc(short(r.date)) + '</td><td>' + esc(r.wedding) + (r.venue ? '<br><span class="muted small">' + esc(r.venue) + '</span>' : '') + '</td><td>' + esc(r.out === '' ? '–' : r.out) + '</td><td>' + esc(r.back === '' ? '–' : r.back) + '</td><td>' + (r.used === '' || r.used == null ? '<span class="pill warn">not back yet</span>' : '<b>' + esc(r.used) + '</b>') + '</td><td class="small">' + esc(r.by || '') + '</td></tr>'; }).join('') || '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>') + '</table></div></div>' : ''));
     $('#w_pick').onchange = function () { var p = val('w_pick'); location.hash = p ? 'weddings/' + encodeURIComponent(p) : 'weddings'; };
@@ -1446,7 +1516,7 @@ ROUTES.packaging = function () {
     if (!counts.length) return toast('Nothing counted yet');
     if (counts.some(function (c) { return c.boxes !== undefined && c.boxes !== '' && !c.perBox; }) && !confirm('Some groups have no "in a box" number, so only the boxes will be saved. Save anyway?')) return;
     record('packStock', { id: uid(), date: val('g_date'), by: val('g_by'), counts: counts }, 'Packaging count saved');
-    location.hash = 'home';
+    goNext(null);
   };
 };
 
