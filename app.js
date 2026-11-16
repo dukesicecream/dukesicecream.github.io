@@ -281,6 +281,7 @@ function todoHtml(due, links) {
   (T.weddings || []).forEach(function (w) { items.push(row('💍', 'Wedding ' + esc(short(w.date)) + (w.flavours && w.flavours.length ? ' – keep aside: <b>' + esc(w.flavours.join(', ')) + '</b>' : ' – flavours not chosen yet'), boss ? '#weddings' : '#home')); });
   (T.rotation || []).forEach(function (b) { items.push(row('⏳', 'Batch ' + esc(b.no) + ' ' + esc(b.flavour) + ' has been in stock ' + b.months + ' months – use it first', '#packing')); });
   (D().toOrder || []).forEach(function (o) { items.push(row('🛒', 'To order: <b>' + esc(o.item) + '</b>' + (o.by ? ' <span class="muted small">(' + esc(o.by.split(' ')[0]) + ')</span>' : ''), '#ingstock', boss && o.id ? '<button class="btn soft sm" data-ordered="' + esc(o.id) + '">Ordered ✓</button>' : '')); });
+  if (isOwner() && S.own && S.own.dash) (S.own.dash.jtodo || []).filter(function (x) { return x.due && x.due <= addDays(today(), 7); }).forEach(function (x) { items.push(row(x.due < today() ? '❗' : '✅', '<b>' + esc(x.item) + '</b> <span class="muted small">(' + esc(short(x.due)) + ', only you see this)</span>', '#jtodo')); });
   if (isOwner() && S.own && S.own.dash) (S.own.dash.lapsed || []).forEach(function (s) { items.push(row('🛎️', '<b>' + esc(s.shop) + '</b> hasn\'t ordered for ' + s.days + ' days (usually every ' + s.usual + ')', '#office')); });
   if (!items.length) return '';
   return '<div class="card" style="margin-top:6px"><h2 style="margin-bottom:6px">📋 To do</h2><div class="list">' + items.join('') + '</div></div>';
@@ -735,37 +736,40 @@ ROUTES.ingstock = function () {
   var catNames = Object.keys(cats).sort(function (a, b) { return (/clean/i.test(a) ? 1 : 0) - (/clean/i.test(b) ? 1 : 0) || (a < b ? -1 : 1); });
   var types = Array.from(new Set(['bags', 'buckets', 'tubs', 'boxes', 'slabs', 'jars', 'bottles', 'cans', 'sacks', 'packs', 'rolls', 'tins'].concat(ings.map(function (i) { return i.packType; }).filter(Boolean))));
   var W = /^(kg|g|l|ml|litres?)$/i;
-  var sizeU = function (i) { return W.test(i.countUnit || '') ? i.countUnit : (W.test(i.unit || '') ? i.unit : 'kg'); };
+  var sizeU = function (i) { return W.test(i.countUnit || '') ? i.countUnit : (W.test(i.unit || '') ? i.unit : (i.name ? 'each' : 'kg')); };
+  var mixOf = {}; if (isOwner()) ((S.own && S.own.insights && S.own.insights.ingredients) || []).forEach(function (g) { if (g.mixL && g.mixL.length) mixOf[g.name] = g.mixL; });
   var cell = function (k, v, w, ph, extra) { return '<input data-k="' + k + '" value="' + esc(v == null ? '' : v) + '" style="width:' + w + 'px" placeholder="' + ph + '"' + (extra || '') + '>'; };
   var line = function (i) {
-    return '<td style="white-space:nowrap">' + cell('qty', '', 60, 'No.', ' inputmode="decimal"') + ' ' + cell('ptype', i.packType || '', 90, 'e.g. bags', ' list="dl_pt"') +
-      ' <span class="muted">of</span> ' + cell('psize', i.packSize === '' || i.packSize == null ? '' : i.packSize, 60, 'size', ' inputmode="decimal"') + ' ' +
-      '<select data-k="sunit" style="width:70px">' + ['kg', 'g', 'L', 'ml'].map(function (u) { return '<option' + (u.toLowerCase() === String(sizeU(i)).toLowerCase() ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select>' +
+    return '<td style="white-space:nowrap">' + cell('qty', '', 60, 'No.', ' inputmode="decimal"') + ' <span class="muted">×</span> ' +
+      cell('psize', i.packSize === '' || i.packSize == null ? '' : i.packSize, 64, 'size', ' inputmode="decimal"') + ' ' +
+      '<select data-k="sunit" style="width:76px">' + ['kg', 'g', 'L', 'ml', 'each'].map(function (u) { return '<option' + (u.toLowerCase() === String(sizeU(i)).toLowerCase() ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select>' +
       ' <b data-t="tot" class="small"></b></td>';
   };
-  render(back() + '<h1>Stock – ingredients & cleaning products</h1><p class="muted">Count the packs and say what size they are, e.g. <b>8</b> bags of <b>25</b> kg sugar, <b>2</b> buckets of <b>3</b> kg bubblegum. For things like bleach just put how many and what (e.g. 3 jars) and leave the size empty. Pack sizes are remembered for next time. Leave a line empty if you didn\'t count it. Packaging is counted on the Packaging stock tab.</p>' +
+  render(back() + '<h1>Stock – ingredients & cleaning products</h1><p class="muted">Put how many and the size of each, e.g. <b>8</b> × <b>25</b> kg sugar, <b>2</b> × <b>3</b> kg bubblegum. For things like bleach just put how many and choose <b>each</b>. Sizes are remembered for next time. Leave a line empty if you didn\'t count it. Packaging is counted on the Packaging stock tab.</p>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('i_date', today(), 'date')) + field('Counted by', staffSel('i_by')) + '</div></div>' +
     catNames.map(function (c) {
       return '<div class="card scroll"><h2>' + esc(c) + '</h2><table class="t">' + cats[c].map(function (i) {
         var l = last[i.name], oo = onOrder[String(i.name).toLowerCase()];
-        return '<tr data-ing="' + esc(i.name) + '" data-cat="' + esc(c) + '" data-re="' + esc(i.reorderAt === '' || i.reorderAt == null ? '' : i.reorderAt) + '"><td>' + esc(i.name) + (i.reorderAt !== '' && i.reorderAt != null ? '<br><span class="small muted">reorder at ' + esc(i.reorderAt) + ' ' + esc(i.packType || '') + '</span>' : '') + '</td>' +
+        return '<tr data-ing="' + esc(i.name) + '" data-cat="' + esc(c) + '" data-re="' + esc(i.reorderAt === '' || i.reorderAt == null ? '' : i.reorderAt) + '"><td>' + esc(i.name) + (i.reorderAt !== '' && i.reorderAt != null ? '<br><span class="small muted">reorder at ' + esc(i.reorderAt) + '</span>' : '') + '</td>' +
           line(i) +
           '<td style="width:130px">' + (oo ? '<span class="pill ok">On the order list</span>' : '<button class="btn soft sm" data-reorder="' + esc(i.name) + '" type="button">Reorder</button>') + '</td>' +
-          '<td class="muted small">' + (l && isOwner() ? 'last ' + (l.packs !== '' && l.packs != null && l.packSize ? esc(l.packs) + ' × ' + esc(l.packSize) + ' = ' : '') + esc(l.qty) + ' ' + esc(l.unit || '') + ' (' + esc(short(l.date)) + ')' : '') + '</td></tr>';
+          '<td class="muted small">' + (l && isOwner() ? 'last ' + (l.packs !== '' && l.packs != null && l.packSize ? esc(l.packs) + ' × ' + esc(l.packSize) + ' = ' : '') + esc(l.qty) + ' ' + esc(l.unit || '') + ' (' + esc(short(l.date)) + ')' : '') +
+          (mixOf[i.name] ? '<br><b style="color:#1c2140">≈ ' + mixOf[i.name].map(function (m) { return m.litres.toLocaleString('en-GB') + ' L of mix' + (m.flavour === 'any flavour' ? '' : ' (' + esc(m.flavour) + ')'); }).join(', ') + '</b>' : '') + '</td></tr>';
       }).join('') + '</table></div>';
     }).join('') +
     '<div class="card scroll"><h2>Something not on the list?</h2><table class="t" id="i_new"></table><button class="btn soft sm" id="i_addrow" type="button">+ Add another</button></div>' +
     '<div class="bar"><button class="btn" id="i_save">Save count</button></div>' +
-    '<datalist id="dl_pt">' + types.map(function (u) { return '<option value="' + esc(u) + '">'; }).join('') + '</datalist>');
+    '');
   var catOpts = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Cleaning products', 'Other'])));
   function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Name, e.g. Sugar" data-k="name"></td>' + line({}) + '<td><select data-k="cat">' + catOpts.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); wire(tr); }
   $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>');
   function read(tr) {
     var g = function (k) { return tr.querySelector('[data-k=' + k + ']').value.trim(); };
-    var n = num(g('qty')), size = num(g('psize')), type = g('ptype'), su = g('sunit');
-    var c = { packs: n, packType: type, packSize: size, sizeUnit: su };
+    var n = num(g('qty')), size = num(g('psize')), su = g('sunit');
+    if (su === 'each') size = '';
+    var c = { packs: n, packType: '', packSize: size, sizeUnit: su };
     if (n === '') { c.qty = ''; return c; }
-    if (size !== '' && size > 0) { c.qty = Math.round(n * size * 1000) / 1000; c.unit = su; } else { c.qty = n; c.unit = type || 'units'; }
+    if (size !== '' && size > 0) { c.qty = Math.round(n * size * 1000) / 1000; c.unit = su; } else { c.qty = n; c.unit = 'each'; }
     return c;
   }
   // show the total and highlight anything at or below its reorder level as it's counted
@@ -790,7 +794,7 @@ ROUTES.ingstock = function () {
   });
   $('#i_save').onclick = function () {
     var counts = $$('tr[data-ing]').map(function (tr) { return Object.assign({ ingredient: tr.dataset.ing }, read(tr)); }).filter(function (c) { return c.qty !== ''; });
-    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) { var c = read(tr); if (c.qty === '') { c.qty = 0; c.packs = 0; c.unit = c.packSize ? c.sizeUnit : (c.packType || 'units'); } counts.push(Object.assign({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), category: tr.querySelector('[data-k=cat]').value }, c)); } });
+    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) { var c = read(tr); if (c.qty === '') { c.qty = 0; c.packs = 0; c.unit = c.packSize ? c.sizeUnit : 'each'; } counts.push(Object.assign({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), category: tr.querySelector('[data-k=cat]').value }, c)); } });
     if (!counts.length) return toast('Nothing counted yet');
     var notC = $$('tr[data-ing]').length - counts.filter(function (c) { return !c.supplier && c.category === undefined; }).length;
     counts.forEach(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }); if (g) { if (c.packType) g.packType = c.packType; if (c.packSize !== '') g.packSize = c.packSize; if (c.packSize !== '') g.countUnit = c.sizeUnit; } });
@@ -1226,7 +1230,11 @@ function drawOffice(data, mine) {
   render(back() + '<h1>Office</h1>' +
     '<div class="tiles noprint" style="margin-bottom:16px">' +
     (mine ? '<a class="tile dark" href="' + esc(I.creamLink || '#') + '" target="_blank"><span class="ic">🥛</span><span><b>Cream & milk order</b><br><small>Strathroy – by 12 noon Monday</small></span></a>' +
-      '<a class="tile" href="' + SHEET_URL + '" target="_blank"><span class="ic">📗</span><span><b>Google Sheet</b><br><small>Prices, shops, settings, lists</small></span></a>' : '') +
+      '<a class="tile" href="' + SHEET_URL + '" target="_blank"><span class="ic">📗</span><span><b>Google Sheet</b><br><small>Prices, shops, settings, lists</small></span></a>' +
+      '<a class="tile" href="#jtodo"><span class="ic">✅</span><span><b>My to do</b><br><small>' + (((data.dash || {}).jtodo || []).filter(function (x) { return x.due && x.due <= addDays(today(), 7); }).length || 'Nothing') + ' due this week</small></span></a>' +
+      '<a class="tile" href="#totals"><span class="ic">📊</span><span><b>Totals</b><br><small>Sales, tubs, ingredients vs last year</small></span></a>' +
+      '<a class="tile" href="#shoplist"><span class="ic">🛒</span><span><b>Shopping list</b><br><small>What to buy, how much, last price</small></span></a>' +
+      '<a class="tile" href="#finance"><span class="ic">💷</span><span><b>Costs & prices</b><br><small>Cost per tub for each flavour</small></span></a>' : '') +
     '<a class="tile" href="#packing"><span class="ic">🧾</span><span><b>Shop orders</b><br><small>Packing list</small></span></a></div>' +
     (short_.length ? '<div class="due bad"><span>💍</span><span><b>Weddings need more stock:</b> ' + short_.map(function (f) { return esc(f.flavour) + ' (' + f.shortfall + ' small tubs short)'; }).join(', ') + '</span></div>' : '') +
     (mine && (I.waiting || []).length ? '<div class="card"><h2>Shop orders to confirm</h2>' + I.waiting.map(function (o) { return '<div class="row"><span><b>' + esc(o.shop) + '</b> · ' + esc(o.no) + '<br><span class="muted">' + esc(nice(o.date)) + ' · ' + o.small + ' small, ' + o.large + ' large</span></span><a class="btn sm" target="_blank" href="' + esc(o.link) + '">Check & confirm</a></div>'; }).join('') + '</div>' : '') +
@@ -1240,10 +1248,139 @@ function drawOffice(data, mine) {
     }).join('') + '</table></div></div>' +
     (mine ? '<div class="card"><h2>Best sellers</h2>' + ((I.bestSellers || []).map(function (b, i) { return '<div class="row"><span>' + (i + 1) + '. ' + esc(b.flavour) + '</span><b>' + b.weeklyLitres + ' L/week</b></div>'; }).join('') || '<p class="muted">Builds up as stock takes and orders are recorded.</p>') + '</div>' : '') +
     '<div class="card"><h2>Ingredients – when to order</h2><p class="muted small">From the last count, plus deliveries, minus what batches used. Flagged when it will run out within its lead time (+1 week).</p><div class="scroll"><table class="t"><tr><th>Ingredient</th><th>In stock (est.)</th><th>Use per week</th><th>Weeks left</th><th>Lead time</th><th>Supplier</th></tr>' +
-    (I.ingredients || []).map(function (g) { var em = ((D().ingredients || []).find(function (x) { return x.name === g.name; }) || {}).supplierEmail; return '<tr><td>' + esc(g.name) + '</td><td>' + (g.est == null ? '<span class="muted">not counted</span>' : g.est + ' ' + esc(g.unit)) + '</td><td>' + (g.weeklyUse || '–') + '</td><td>' + (g.warn ? '<span class="pill bad">' + g.weeksLeft + ' – order now</span>' : (g.weeksLeft == null ? '–' : g.weeksLeft)) + '</td><td>' + g.lead + ' wks</td><td>' + esc(g.supplier || '?') + (g.warn ? ' <a class="btn soft sm" href="' + esc(orderMail([g.name], g.supplier, em)) + '">✉️ Draft order</a>' : '') + '</td></tr>'; }).join('') + '</table></div><p class="muted small">"Draft order" opens an email in your mail app for you to check and send. Add supplier email addresses in the Supplier email column on the Ingredients tab.</p></div>' +
+    (I.ingredients || []).map(function (g) { var em = ((D().ingredients || []).find(function (x) { return x.name === g.name; }) || {}).supplierEmail; return '<tr><td>' + esc(g.name) + (g.mixL && g.mixL.length ? '<br><span class="small muted">≈ ' + g.mixL.map(function (m) { return m.litres.toLocaleString('en-GB') + ' L of mix' + (m.flavour === 'any flavour' ? '' : ' (' + esc(m.flavour) + ')'); }).join(', ') + '</span>' : '') + '</td><td>' + (g.est == null ? '<span class="muted">not counted</span>' : g.est + ' ' + esc(g.unit)) + '</td><td>' + (g.weeklyUse || '–') + '</td><td>' + (g.warn ? '<span class="pill bad">' + g.weeksLeft + ' – order now</span>' : (g.weeksLeft == null ? '–' : g.weeksLeft)) + '</td><td>' + g.lead + ' wks</td><td>' + esc(g.supplier || '?') + (g.warn ? ' <a class="btn soft sm" href="' + esc(orderMail([g.name], g.supplier, em)) + '">✉️ Draft order</a>' : '') + '</td></tr>'; }).join('') + '</table></div><p class="muted small">"Draft order" opens an email in your mail app for you to check and send. Add supplier email addresses in the Supplier email column on the Ingredients tab.</p></div>' +
     ((D().toOrder || []).length ? '<div class="card"><h2>🛒 Asked to be ordered</h2>' + D().toOrder.map(function (o) { var g = (D().ingredients || []).find(function (x) { return x.name === o.item; }) || {}; return '<div class="row"><span><b>' + esc(o.item) + '</b><br><span class="muted small">asked by ' + esc(o.by || '') + ' · ' + esc(short(o.date)) + (g.supplier ? ' · ' + esc(g.supplier) : '') + '</span></span><span><a class="btn soft sm" href="' + esc(orderMail([o.item], g.supplier, g.supplierEmail)) + '">✉️ Draft order</a> <button class="btn sm" data-ordered="' + esc(o.id || '') + '">Ordered ✓</button></span></div>'; }).join('') + '</div>' : '') +
     '<div class="card"><h2>Weddings coming up</h2>' + ((I.weddings || []).map(function (w) { return '<div class="row"><span><b>' + esc(nice(w.date)) + '</b> · ' + esc(w.name) + '<br><span class="muted">' + esc(w.flavours.join(', ') || 'Flavours not chosen yet') + '</span></span><span>' + w.guests + ' guests</span></div>'; }).join('') || '<p class="muted">None booked in the next few weeks.</p>') + '</div>' +
     '<div class="card"><h2>Shop orders expected</h2>' + ((I.shops || []).map(function (s) { return '<div class="row"><span><b>' + esc(s.shop) + '</b><br><span class="muted">' + s.orders + ' orders · usually ' + s.small + ' small / ' + s.large + ' large' + (s.avgDays ? ' · every ' + s.avgDays + ' days' : '') + '</span></span><span>' + (s.nextDue ? 'about ' + esc(short(s.nextDue)) : '–') + '</span></div>'; }).join('') || '<p class="muted">Builds up once shops order through their links.</p>') + '</div>');
+}
+
+/* ---------- Jonny only: to-do, totals, shopping list, costs & prices ---------- */
+function onlyJonny(title) { if (isOwner()) return false; render(back() + '<h1>' + esc(title) + '</h1><div class="card">This page is only for Jonny. Sign in as Jonny with your passcode.</div>'); return true; }
+function gbp(n, dp) { return n == null || n === '' || isNaN(Number(n)) ? '–' : '£' + Number(n).toLocaleString('en-GB', { minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp }); }
+function ownLoad(title, op, draw, d) {
+  if (onlyJonny(title)) return;
+  if (!navigator.onLine) return render(back('office', 'Office') + '<h1>' + esc(title) + '</h1><div class="card">This page needs the internet.</div>');
+  render(back('office', 'Office') + '<h1>' + esc(title) + '</h1><p class="muted center">Loading…</p>');
+  var here = location.hash;
+  ownerCall({ op: op, d: d }).then(function (r) { if (location.hash !== here) return; if (!r.ok) { toast(r.error || 'Could not open'); return; } draw(r); })
+    .catch(function () { render(back('office', 'Office') + '<h1>' + esc(title) + '</h1><div class="card">No connection.</div>'); });
+}
+
+// My to do
+ROUTES.jtodo = function () { ownLoad('My to do', 'jtodo', drawJtodo); };
+function drawJtodo(r) {
+  var t = today(), items = r.items || [];
+  var row = function (x) {
+    var late = x.due && x.due < t, soon = x.due && !late && x.due <= addDays(t, 7);
+    return '<div class="row" style="' + (late ? 'background:#fdecea;' : soon ? 'background:#fff4d6;' : '') + 'border-radius:8px;padding:8px 10px"><span><b>' + esc(x.item) + '</b><br><span class="small muted">' +
+      (x.due ? (late ? '<b style="color:#b3261e">overdue – </b>' : '') + esc(nice(x.due)) : 'no date') + (x.repeat ? ' · repeats ' + esc(x.repeat) : '') + (x.notes ? ' · ' + esc(x.notes) : '') + '</span></span>' +
+      '<span style="white-space:nowrap"><button class="btn sm" data-done="' + esc(x.id) + '">Done ✓</button> <button class="btn soft sm" data-del="' + esc(x.id) + '">✕</button></span></div>';
+  };
+  render(back('office', 'Office') + '<h1>✅ My to do</h1><p class="muted">Only you see this. Repeating jobs (wages, invoices, VAT…) come back with the next date when you tick them.</p>' +
+    '<div class="card"><div class="list">' + (items.map(row).join('') || '<p class="muted">Nothing on the list.</p>') + '</div></div>' +
+    '<div class="card"><h2>Add a job</h2>' + field('What', inp('j_item', '', 'text', ' placeholder="e.g. Pay wages, send shop invoices, VAT return"')) +
+    '<div class="grid2">' + field('When', inp('j_due', '', 'date')) + field('Repeat', '<select id="j_rep"><option value="">No</option><option>weekly</option><option>fortnightly</option><option>monthly</option><option>every 3 months</option><option>yearly</option></select>') + '</div>' +
+    field('Notes (optional)', inp('j_notes', '')) + '<button class="btn" id="j_add">Add</button></div>');
+  var call = function (d, msg) { ownerCall({ op: 'jtodo', d: d }).then(function (x) { if (x.ok) { if (S.own && S.own.dash) S.own.dash.jtodo = x.items; if (msg) toast(msg); drawJtodo(x); } else toast(x.error || 'Could not save'); }).catch(function () { toast('No connection'); }); };
+  $('#j_add').onclick = function () { if (!val('j_item')) return toast('What needs doing?'); $('#j_add').disabled = true; call({ act: 'add', item: val('j_item'), due: val('j_due'), repeat: val('j_rep'), notes: val('j_notes') }, 'Added'); };
+  $$('[data-done]').forEach(function (b) { b.onclick = function () { b.disabled = true; call({ act: 'done', id: b.dataset.done }, 'Done'); }; });
+  $$('[data-del]').forEach(function (b) { b.onclick = function () { if (confirm('Remove this job?')) call({ act: 'del', id: b.dataset.del }, 'Removed'); }; });
+}
+
+// Totals
+ROUTES.totals = function (which) { ownLoad('Totals', 'totals', function (r) { S.totals = r; drawTotals(r, which); }); };
+function drawTotals(r, which) {
+  var R = r.ranges || [], i = Math.max(0, R.map(function (x) { return x.label; }).indexOf(decodeURIComponent(which || '12 months')));
+  var g = R[i] || {}, c = g.cur || {}, p = g.prev;
+  var pc = function (a, b) { if (!p || b == null || !b) return '<span class="muted small">' + (p ? 'no figures last year' : '') + '</span>'; var x = Math.round((a - b) / b * 100); return '<span style="font-weight:bold;color:' + (x >= 0 ? '#1b7a4a' : '#b3261e') + '">' + (x > 0 ? '▲ +' : x < 0 ? '▼ ' : '') + x + '%</span> <span class="muted small">vs last year</span>'; };
+  var n = function (v) { return (Number(v) || 0).toLocaleString('en-GB'); };
+  var tile = function (label, big, sub, key) { return '<div class="card" style="margin:0;padding:16px 18px;border-top:4px solid #1c2140"><div class="small muted" style="text-transform:uppercase;letter-spacing:.06em">' + label + '</div><div style="font-family:Georgia,serif;font-size:30px;color:#1c2140;line-height:1.25;margin:4px 0">' + big + '</div><div class="small">' + (sub || '') + '</div>' + (key ? '<div style="margin-top:4px">' + pc(c[key[0]], p && p[key[0]]) + '</div>' : '') + '</div>'; };
+  var m = r.month || {}, mc = m.cur || {}, mp = m.prev || {};
+  var mpc = function (k) { var b = mp[k], a = mc[k]; if (!b) return '<span class="muted">–</span>'; var x = Math.round((a - b) / b * 100); return '<b style="color:' + (x >= 0 ? '#1b7a4a' : '#b3261e') + '">' + (x > 0 ? '+' : '') + x + '%</b>'; };
+  var ingRows = (r.topIngredients || []).map(function (k) { var a = (c.ing || {})[k], b = p && (p.ing || {})[k]; if (!a && !b) return ''; var u = (a || b).unit; return '<tr><td>' + esc(k) + '</td><td><b>' + n(Math.round(a ? a.qty : 0)) + '</b> ' + esc(u) + '</td><td>' + (p ? (b ? n(Math.round(b.qty)) + ' ' + esc(u) : '–') : '') + '</td><td>' + (p && b && a ? pc(a.qty, b.qty) : '') + '</td></tr>'; }).join('');
+  render(back('office', 'Office') + '<h1>📊 Totals</h1><p class="muted">Only you see this. Compared with the same dates a year earlier. Sales by tub come from the Saturday stock takes, so they fill in as those build up' + (r.since ? ' (records start ' + esc(nice(r.since)) + ')' : '') + '.</p>' +
+    '<div class="chips noprint" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">' + R.map(function (x, j) { return '<a class="btn ' + (j === i ? '' : 'soft ') + 'sm" href="#totals/' + encodeURIComponent(x.label) + '">' + esc(x.label) + '</a>'; }).join('') + '</div>' +
+    '<div class="hint" style="margin-bottom:14px"><b>' + esc(m.label || '') + ' so far vs the same days last year:</b> shop sales ' + gbp(mc.shopSales, 0) + ' (' + mpc('shopSales') + ') · tubs sold ' + n(mc.soldS + mc.soldL) + ' (' + mpc('soldS') + ') · mix made ' + n(mc.mixLitres) + ' L (' + mpc('mixLitres') + ')</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">' +
+    tile('Shop sales', gbp(c.shopSales, 0), n(c.shopOrders) + ' orders · ' + n(c.shopTubsS) + ' small, ' + n(c.shopTubsL) + ' big', ['shopSales']) +
+    tile('Tubs sold (all)', n(c.soldS + c.soldL), n(c.soldS) + ' small · ' + n(c.soldL) + ' big · ≈ ' + n(c.soldLitres) + ' L' + (c.weeksCounted ? '' : '<br><i>needs stock takes</i>'), ['soldS']) +
+    tile('Farm shop', n(c.farmS + c.farmL) + ' tubs', n(c.farmS) + ' small · ' + n(c.farmL) + ' big', ['farmS']) +
+    tile('Weddings', n(c.weddings), n(c.weddingTubs) + ' small tubs served', ['weddings']) +
+    tile('Tubs made', n(c.madeS + c.madeL), n(c.madeS) + ' small · ' + n(c.madeL) + ' big' + (c.madeN ? ' · ' + n(c.madeN) + ' Napolis' : ''), ['madeS']) +
+    tile('Mix made', n(c.mixLitres) + ' L', n(c.batches) + ' batch' + (c.batches === 1 ? '' : 'es'), ['mixLitres']) + '</div>' +
+    '<div class="card"><h2>Ingredients used – ' + esc(g.label || '') + '</h2><div class="scroll"><table class="t"><tr><th>Ingredient</th><th>Used</th><th>' + (p ? 'Same time last year' : '') + '</th><th></th></tr>' + (ingRows || '<tr><td colspan="4" class="muted">Fills in from the batch records.</td></tr>') + '</table></div></div>');
+}
+
+// Shopping list
+ROUTES.shoplist = function () { ownLoad('Shopping list', 'shop', function (r) { S.shopItems = r.items || []; drawShop(); }); };
+function drawShop() {
+  var items = S.shopItems || [], months = S.shopMonths || 2, picked = S.shopPicked || (S.shopPicked = {});
+  if (!S.shopInit) { items.forEach(function (x) { if (x.warn) picked[x.name] = true; }); S.shopInit = true; }
+  var cvt = function (q, from, to) { from = String(from || '').toLowerCase(); to = String(to || '').toLowerCase(); if (from === to) return q; if (from === 'g' && to === 'kg') return q / 1000; if (from === 'kg' && to === 'g') return q * 1000; if (from === 'ml' && to === 'l') return q / 1000; if (from === 'l' && to === 'ml') return q * 1000; return q; };
+  var plan = function (x) {
+    var need = Math.max(0, (x.weekly || 0) * months * 4.345 - (x.est || 0));
+    var size = x.packSize ? cvt(x.packSize, x.packUnit, x.unit) : 0;
+    var packs = size ? Math.ceil(need / size - 1e-9) : Math.ceil(need);
+    var cost = x.price ? (size ? packs * size : need) * x.price : null;
+    return { need: need, packs: packs, cost: cost, size: size };
+  };
+  var lp = function (x) { var l = x.lastPaid; if (!l) return x.price ? gbp(x.price) + '/' + esc(x.unit) : '<span class="muted">–</span>'; return gbp(l.total) + ' for ' + l.qty + ' ' + esc(l.unit) + '<br><span class="small muted">' + esc(short(l.date)) + (l.supplier ? ' · ' + esc(l.supplier) : '') + '</span>'; };
+  var tot = 0, rows = items.map(function (x) {
+    var pl = plan(x), on = !!picked[x.name]; if (on && pl.cost) tot += pl.cost;
+    return '<tr data-n="' + esc(x.name) + '" style="' + (x.warn ? 'background:#fff4d6' : '') + '"><td class="noprint"><input type="checkbox" data-pick="' + esc(x.name) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px"></td>' +
+      '<td><b>' + esc(x.name) + '</b>' + (x.warn ? ' <span class="pill warn">suggested</span>' : '') + '<br><span class="small muted">' + esc(x.supplier || 'supplier?') + (x.weeksLeft != null ? ' · ≈ ' + x.weeksLeft + ' wks left' : '') + '</span></td>' +
+      '<td>' + (x.est == null ? '<span class="muted">not counted</span>' : Math.round(x.est * 10) / 10 + ' ' + esc(x.unit)) + '</td><td>' + (x.weekly ? Math.round(x.weekly * 100) / 100 + ' ' + esc(x.unit) : '<span class="muted">–</span>') + '</td>' +
+      '<td><b>' + (pl.size ? pl.packs + ' × ' + x.packSize + ' ' + esc(x.packUnit) : (Math.round(pl.need * 10) / 10) + ' ' + esc(x.unit)) + '</b>' + (!x.weekly ? '<br><span class="small muted">no usage yet</span>' : '') + '</td>' +
+      '<td>' + lp(x) + '</td><td>' + (pl.cost != null ? gbp(pl.cost) : '<span class="muted">–</span>') + '</td>' +
+      '<td class="noprint"><a class="small" target="_blank" href="https://www.google.com/search?tbm=shop&q=' + encodeURIComponent(x.name + (x.packSize ? ' ' + x.packSize + x.packUnit : '') + ' wholesale') + '">Prices online ↗</a></td></tr>';
+  }).join('');
+  var sups = {}; items.filter(function (x) { return picked[x.name]; }).forEach(function (x) { var k = x.supplier || 'Other'; (sups[k] = sups[k] || { email: x.email, list: [] }).list.push(x); });
+  render(back('office', 'Office') + '<h1>🛒 Shopping list</h1><p class="muted">Only you see this. Tick what you want to buy and how long it should last. Amounts are worked out from what the batches have used over the last 12 weeks, minus what\'s in stock. Things running low are ticked for you.</p>' +
+    '<div class="card noprint"><b>Enough to last </b><select id="sh_m">' + [1, 2, 3, 4, 6, 9, 12].map(function (m) { return '<option value="' + m + '"' + (m === months ? ' selected' : '') + '>' + m + ' month' + (m > 1 ? 's' : '') + '</option>'; }).join('') + '</select>' +
+    ' <button class="btn soft sm" id="sh_all">Tick all</button> <button class="btn soft sm" id="sh_none">Untick all</button></div>' +
+    '<div class="card scroll"><table class="t"><tr><th class="noprint"></th><th>Item</th><th>In stock</th><th>Use / week</th><th>To buy (' + months + ' mo)</th><th>Last paid</th><th>Cost (≈)</th><th class="noprint"></th></tr>' + rows + '</table>' +
+    '<p style="margin-top:10px"><b>Estimated total for what\'s ticked: ' + gbp(tot) + '</b> <span class="small muted">(where prices are known, ex VAT)</span></p></div>' +
+    '<div class="card noprint"><h2>Order it</h2>' + (Object.keys(sups).length ? Object.keys(sups).map(function (k) {
+      var lines = sups[k].list.map(function (x) { var pl = plan(x); return x.name + ': ' + (pl.size ? pl.packs + ' x ' + x.packSize + ' ' + x.packUnit : Math.round(pl.need * 10) / 10 + ' ' + x.unit); });
+      return '<div class="row"><span><b>' + esc(k) + '</b><br><span class="small muted">' + esc(lines.join(' · ')) + '</span></span>' + (k !== 'Other' && !/makro|cash|shop/i.test(k) ? '<a class="btn soft sm" href="' + esc(orderMail(lines, k, sups[k].email)) + '">✉️ Draft email</a>' : '<span class="small muted">buy in store</span>') + '</div>';
+    }).join('') : '<p class="muted">Tick some items first.</p>') +
+    '<p><button class="btn" onclick="window.print()">🖨️ Print / save as PDF</button></p><p class="small muted">"Draft email" opens an email in your mail app for you to check and send – nothing is sent automatically. "Prices online" opens a Google Shopping search. Send me photos of your invoices in the Claude chat and I\'ll compare prices properly, including delivery to NI.</p></div>');
+  $('#sh_m').onchange = function () { S.shopMonths = Number(this.value); drawShop(); };
+  $('#sh_all').onclick = function () { items.forEach(function (x) { picked[x.name] = true; }); drawShop(); };
+  $('#sh_none').onclick = function () { S.shopPicked = {}; drawShop(); };
+  $$('[data-pick]').forEach(function (b) { b.onchange = function () { if (b.checked) picked[b.dataset.pick] = true; else delete picked[b.dataset.pick]; drawShop(); }; });
+}
+
+// Costs & prices (finance)
+ROUTES.finance = function () { ownLoad('Costs & prices', 'finance', drawFinance); };
+function drawFinance(r) {
+  var f = r.flavours || [], m = function (n) { return gbp(n, n != null && n < 1 ? 3 : 2); };
+  var margin = function (cost, price) { if (!price || !cost) return ''; var x = Math.round((price - cost) / price * 100); return '<br><span class="small" style="color:' + (x >= 30 ? '#1b7a4a' : '#b3261e') + '">' + x + '% margin at ' + gbp(price) + '</span>'; };
+  var costRows = f.map(function (x) { return '<tr><td><b>' + esc(x.flavour) + '</b></td><td>' + m(x.small) + margin(x.small, r.shopSmall) + '</td><td>' + m(x.large) + margin(x.large, r.shopLarge) + '</td><td>' + m(x.napoli) + '</td><td class="small muted">' + gbp(x.ingL, 3) + '/L</td></tr>'; }).join('');
+  var s0 = f[0] && f[0].parts;
+  var ingP = (r.prices || []).map(function (p) {
+    var perPack = p.packSize && p.price !== '' ? Math.round(p.price * (function () { var a = String(p.packUnit).toLowerCase(), b = String(p.unit).toLowerCase(); return a === b ? p.packSize : a === 'g' && b === 'kg' ? p.packSize / 1000 : a === 'kg' && b === 'g' ? p.packSize * 1000 : a === 'ml' && b === 'l' ? p.packSize / 1000 : a === 'l' && b === 'ml' ? p.packSize * 1000 : p.packSize; })() * 100) / 100 : '';
+    return '<tr data-ing="' + esc(p.name) + '"' + (r.missing.indexOf(p.name) >= 0 ? ' style="background:#fff4d6"' : '') + '><td>' + esc(p.name) + '</td>' +
+      (p.packSize ? '<td>£ <input data-k="pack" inputmode="decimal" style="width:80px" value="' + esc(perPack) + '"> per ' + p.packSize + ' ' + esc(p.packUnit) + '</td>' : '<td>£ <input data-k="unit" inputmode="decimal" style="width:80px" value="' + esc(p.price) + '"> per ' + esc(p.unit || 'unit') + '</td>') +
+      '<td class="small muted">' + (p.price !== '' ? gbp(p.price, 3) + ' per ' + esc(p.unit) : 'no price') + '</td></tr>';
+  }).join('');
+  var packP = (r.packPrices || []).map(function (p) { return '<tr data-pk="' + esc(p.item) + '"><td>' + esc(p.item) + '</td><td>£ <input data-k="price" inputmode="decimal" style="width:80px" value="' + esc(p.price) + '"> per ' + (/roll/i.test(p.unit) ? 'roll' + (p.perRoll ? ' of ' + p.perRoll : '') : 'one') + '</td></tr>'; }).join('');
+  render(back('office', 'Office') + '<h1>💷 Costs & prices</h1><p class="muted">Only you see this. Enter prices <b>excluding VAT</b>. The cost of each tub is worked out from the recipes, your prices, overrun, packaging, wages on production days and your other monthly costs.</p>' +
+    (r.missing.length ? '<div class="due" style="background:#fff4d6;border-color:#e3c46b;color:#5a4300"><span>⚠️</span><span><b>No price yet for:</b> ' + r.missing.map(esc).join(', ') + '. The costs below leave these out until they\'re filled in (shaded below). Send me photos of the invoices in the Claude chat and I\'ll fill them in for you.</span></div>' : '') +
+    '<div class="card"><h2>Cost to make</h2><div class="scroll"><table class="t"><tr><th>Flavour</th><th>Small tub</th><th>Big tub</th><th>Napoli</th><th>Ingredients</th></tr>' + (costRows || '<tr><td colspan="5" class="muted">No recipes yet.</td></tr>') + '</table></div>' +
+    (s0 ? '<p class="small">A small tub of ' + esc(f[0].flavour) + ' = ingredients ' + m(s0.smallIng) + ' + wages ' + m(s0.smallLab) + ' + other costs ' + m(s0.smallOther) + ' + tub & lid ' + m(s0.smallPack) + '.</p>' : '') +
+    '<div class="hint small"><b>Based on:</b> overrun ' + r.overrun + '%' + (r.overrunMeasured ? ' (measured from your tub counts)' : ' (assumed – change "Assumed overrun %" on the Settings tab until the tub counts show the real figure)') +
+    ' · wages ' + gbp(r.wages, 0) + ' on ' + r.prodDays + ' production days over the last 12 weeks for ' + (r.litres || 0) + ' L of mix = ' + gbp(r.labourL, 3) + ' per litre' + (r.noRate.length ? ' <b>(no pay rate for ' + r.noRate.map(esc).join(', ') + ')</b>' : '') +
+    ' · other costs ' + gbp(r.otherMonth, 0) + ' a month = ' + gbp(r.otherL, 3) + ' per litre (edit these on the <b>Other costs</b> tab of the Sheet).</div></div>' +
+    '<div class="card"><h2>Ingredient prices</h2><p class="small muted">Type the price you pay for one pack – it\'s turned into a price per kg or litre.</p><div class="scroll"><table class="t">' + ingP + '</table></div></div>' +
+    '<div class="card"><h2>Packaging prices</h2><div class="scroll"><table class="t">' + packP + '</table></div></div>' +
+    '<div class="bar"><button class="btn" id="fi_save">Save prices</button></div>');
+  $('#fi_save').onclick = function () {
+    var ing = $$('tr[data-ing]').map(function (tr) { var a = tr.querySelector('[data-k=pack]'), b = tr.querySelector('[data-k=unit]'); return { name: tr.dataset.ing, perPack: a ? num(a.value) : '', perUnit: b ? num(b.value) : '' }; }).filter(function (x) { return x.perPack !== '' || x.perUnit !== ''; });
+    var pack = $$('tr[data-pk]').map(function (tr) { return { item: tr.dataset.pk, price: num(tr.querySelector('[data-k=price]').value) }; }).filter(function (x) { return x.price !== ''; });
+    $('#fi_save').disabled = true;
+    ownerCall({ op: 'prices', d: { ing: ing, pack: pack } }).then(function (x) { if (x.ok) { toast('Prices saved'); drawFinance(x); } else { toast(x.error || 'Could not save'); $('#fi_save').disabled = false; } }).catch(function () { toast('No connection'); $('#fi_save').disabled = false; });
+  };
 }
 
 /* ---------- packaging stock ---------- */
