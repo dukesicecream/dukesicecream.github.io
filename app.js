@@ -333,7 +333,7 @@ function isOwner() { return S.user === owner() && !!S.jcode; }
 function disp(n, q, u) {
   if (q === '' || q == null || isNaN(Number(q))) return { q: q, unit: u };
   var lu = String(u || '').toLowerCase(); q = Number(q);
-  if (lu === 'g' || lu === 'kg') { var g = lu === 'kg' ? q * 1000 : q; return g > 10000 ? { q: r2(g / 1000, 3), unit: 'kg' } : { q: g < 10 ? r2(g, 1) : Math.round(g), unit: 'g' }; }
+  if (lu === 'g' || lu === 'kg') { var g = lu === 'kg' ? q * 1000 : q; return g > 10000 ? { q: r2(g / 1000, 3), unit: 'kg' } : { q: g > 0 && g < 1 ? r2(g, 1) : Math.round(g), unit: 'g' }; }
   return { q: rq(n, q), unit: u };
 }
 function perOf(l) { return Number(l.per) || setN('Base mix litres', 300); }
@@ -859,7 +859,7 @@ ROUTES.packing = function (no) {
 ROUTES.messages = function () {
   var msgs = (D().messages || []).slice().reverse();
   render(back() + '<h1>Messages & reminders</h1><div class="card"><h2>New message</h2>' +
-    '<div class="grid2">' + field('To', sel('m_to', [{ v: 'Jonny', t: 'Jonny' }, { v: 'Paul', t: 'Paul' }, { v: 'Both', t: 'Jonny & Paul' }, { v: 'Everyone', t: 'Everyone (shows on everyone\'s home screen)' }], S.user.indexOf('Jonny') === 0 ? 'Paul' : 'Jonny')) +
+    '<div class="grid2">' + field('To', sel('m_to', [{ v: 'Jonny', t: 'Jonny' }, { v: 'Paul', t: 'Paul' }, { v: 'Both', t: 'Jonny & Paul' }, { v: 'Everyone', t: 'Everyone (shows on everyone\'s home screen)' }].concat(S.user === manager() || isOwner() ? [{ v: 'Jonny\'s to do', t: 'Jonny\'s to-do list (only Jonny sees it)' }] : []), S.user.indexOf('Jonny') === 0 ? 'Paul' : 'Jonny')) +
     field('Send it on (leave empty to send now)', inp('m_when', '', 'date')) + '</div>' +
     field('Message', '<textarea id="m_text" placeholder="e.g. Running low on large tubs – order more"></textarea>') +
     '<button class="btn" id="m_send">Send</button></div>' +
@@ -868,7 +868,7 @@ ROUTES.messages = function () {
     }).join('') || '<p class="muted">No messages yet.</p>') + '</div>');
   $('#m_send').onclick = function () {
     if (!val('m_text')) return toast('Write a message first');
-    record('message', { id: uid(), from: S.user, to: val('m_to'), text: val('m_text'), remind: val('m_when') }, val('m_when') ? 'Reminder set for ' + short(val('m_when')) : (navigator.onLine ? 'Message sent' : 'Will send when back online'));
+    record('message', { id: uid(), from: S.user, to: val('m_to'), text: val('m_text'), remind: val('m_when') }, /to do/i.test(val('m_to')) ? 'Added to Jonny\'s to-do list' : val('m_when') ? 'Reminder set for ' + short(val('m_when')) : (navigator.onLine ? 'Message sent' : 'Will send when back online'));
     route();
   };
 };
