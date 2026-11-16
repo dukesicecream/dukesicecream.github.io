@@ -144,7 +144,7 @@ function applyLocal(op, data) {
     case 'pest': data.pest = data.pest || []; upsertBy(data.pest, 'id', d); data.due = (data.due || []).filter(function (x) { return x.key !== 'pest'; }); break;
     case 'iceStock': data.iceStock = (data.iceStock || []).filter(function (x) { return x.id.indexOf(d.id + ':') !== 0; }).concat(d.counts.map(function (c) { return Object.assign({ id: d.id + ':' + c.flavour, date: d.date, by: d.by }, c); }));
       data.due = (data.due || []).filter(function (x) { return x.key !== 'stock'; }); break;
-    case 'ingStock': data.ingStock = (data.ingStock || []).filter(function (x) { return x.id.indexOf(d.id + ':') !== 0; }).concat(d.counts.filter(function (c) { return c.qty !== ''; }).map(function (c) { return { id: d.id + ':' + c.ingredient, date: d.date, ingredient: c.ingredient, qty: c.qty, unit: c.unit, by: d.by }; }));
+    case 'ingStock': data.ingStock = (data.ingStock || []).filter(function (x) { return x.id.indexOf(d.id + ':') !== 0; }).concat(d.counts.filter(function (c) { return c.qty !== ''; }).map(function (c) { return { id: d.id + ':' + c.ingredient, date: d.date, ingredient: c.ingredient, qty: c.qty, unit: c.unit, packs: c.packs, packSize: c.packSize, packType: c.packType, by: d.by }; }));
       d.counts.forEach(function (c) { if (c.ingredient && !data.ingredients.some(function (i) { return i.name.toLowerCase() === c.ingredient.toLowerCase(); })) data.ingredients.push({ name: c.ingredient, unit: c.unit, track: true }); });
       break;
     case 'packStock': data.packStock = data.packStock || {}; (d.counts || []).forEach(function (c) { data.packStock[c.item] = { date: d.date, qty: c.qty, rolls: c.rolls, perRoll: c.perRoll, boxes: c.boxes, perBox: c.perBox, by: d.by }; (data.packItems || []).forEach(function (i) { if (i.item === c.item && c.perBox) i.perBox = c.perBox; }); if (!(data.packItems || []).some(function (i) { return i.item === c.item; })) (data.packItems = data.packItems || []).push({ item: c.item, group: c.group, unit: c.unit, perRoll: c.perRoll }); }); break;
@@ -727,38 +727,59 @@ ROUTES.stock = function () {
 
 /* ---------- ingredient stock count (any unit, remembered) + cleaning products + reorder ---------- */
 ROUTES.ingstock = function () {
-  var ings = (D().ingredients || []).filter(function (i) { return i.track; });
+  // packaging has its own tab, so it's left out here
+  var ings = (D().ingredients || []).filter(function (i) { return i.track && !/packag/i.test(i.category || ''); });
   var last = {}; (D().ingStock || []).forEach(function (x) { if (!last[x.ingredient] || last[x.ingredient].date <= x.date) last[x.ingredient] = x; });
   var onOrder = {}; (D().toOrder || []).forEach(function (o) { onOrder[String(o.item).toLowerCase()] = o; });
   var cats = {}; ings.forEach(function (i) { (cats[i.category || 'Other'] = cats[i.category || 'Other'] || []).push(i); });
   var catNames = Object.keys(cats).sort(function (a, b) { return (/clean/i.test(a) ? 1 : 0) - (/clean/i.test(b) ? 1 : 0) || (a < b ? -1 : 1); });
-  var units = Array.from(new Set(['kg', 'g', 'L', 'ml', 'buckets', 'slabs', 'boxes', 'jars', 'bottles', 'bags', 'tubs', 'rolls', 'packs', 'units'].concat(ings.map(function (i) { return i.countUnit; }).filter(Boolean))));
-  render(back() + '<h1>Stock – ingredients & cleaning products</h1><p class="muted">Count what\'s there in whatever unit makes sense (buckets, slabs, boxes, jars…) – the unit is remembered for next time. Leave a box empty if you didn\'t count it. Tap <b>Reorder</b> if something is running low.</p>' +
+  var types = Array.from(new Set(['bags', 'buckets', 'tubs', 'boxes', 'slabs', 'jars', 'bottles', 'cans', 'sacks', 'packs', 'rolls', 'tins'].concat(ings.map(function (i) { return i.packType; }).filter(Boolean))));
+  var W = /^(kg|g|l|ml|litres?)$/i;
+  var sizeU = function (i) { return W.test(i.countUnit || '') ? i.countUnit : (W.test(i.unit || '') ? i.unit : 'kg'); };
+  var cell = function (k, v, w, ph, extra) { return '<input data-k="' + k + '" value="' + esc(v == null ? '' : v) + '" style="width:' + w + 'px" placeholder="' + ph + '"' + (extra || '') + '>'; };
+  var line = function (i) {
+    return '<td style="white-space:nowrap">' + cell('qty', '', 64, 'How many', ' inputmode="decimal"') + ' ' + cell('ptype', i.packType || '', 86, 'bags', ' list="dl_pt"') +
+      ' <span class="muted">of</span> ' + cell('psize', i.packSize === '' || i.packSize == null ? '' : i.packSize, 60, 'size', ' inputmode="decimal"') + ' ' +
+      '<select data-k="sunit" style="width:70px">' + ['kg', 'g', 'L', 'ml'].map(function (u) { return '<option' + (u.toLowerCase() === String(sizeU(i)).toLowerCase() ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select>' +
+      ' <b data-t="tot" class="small"></b></td>';
+  };
+  render(back() + '<h1>Stock – ingredients & cleaning products</h1><p class="muted">Count the packs and say what size they are, e.g. <b>8</b> bags of <b>25</b> kg sugar, <b>2</b> buckets of <b>3</b> kg bubblegum. For things like bleach just put how many and what (e.g. 3 jars) and leave the size empty. Pack sizes are remembered for next time. Leave a line empty if you didn\'t count it. Packaging is counted on the Packaging stock tab.</p>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('i_date', today(), 'date')) + field('Counted by', staffSel('i_by')) + '</div></div>' +
     catNames.map(function (c) {
-      return '<div class="card"><h2>' + esc(c) + '</h2><table class="t">' + cats[c].map(function (i) {
-        var l = last[i.name], u = i.countUnit || i.unit || '', oo = onOrder[String(i.name).toLowerCase()];
-        return '<tr data-ing="' + esc(i.name) + '" data-cat="' + esc(c) + '" data-re="' + esc(i.reorderAt === '' || i.reorderAt == null ? '' : i.reorderAt) + '"><td>' + esc(i.name) + (i.reorderAt !== '' && i.reorderAt != null ? '<br><span class="small muted">reorder at ' + esc(i.reorderAt) + '</span>' : '') + '</td>' +
-          '<td style="width:110px"><input data-k="qty" inputmode="decimal"></td><td style="width:110px"><input data-k="unit" value="' + esc(u) + '" list="dl_iu"></td>' +
+      return '<div class="card scroll"><h2>' + esc(c) + '</h2><table class="t">' + cats[c].map(function (i) {
+        var l = last[i.name], oo = onOrder[String(i.name).toLowerCase()];
+        return '<tr data-ing="' + esc(i.name) + '" data-cat="' + esc(c) + '" data-re="' + esc(i.reorderAt === '' || i.reorderAt == null ? '' : i.reorderAt) + '"><td>' + esc(i.name) + (i.reorderAt !== '' && i.reorderAt != null ? '<br><span class="small muted">reorder at ' + esc(i.reorderAt) + ' ' + esc(i.packType || '') + '</span>' : '') + '</td>' +
+          line(i) +
           '<td style="width:130px">' + (oo ? '<span class="pill ok">On the order list</span>' : '<button class="btn soft sm" data-reorder="' + esc(i.name) + '" type="button">Reorder</button>') + '</td>' +
-          '<td class="muted small">' + (l && isOwner() ? 'last ' + esc(l.qty) + ' ' + esc(l.unit || '') + ' (' + esc(short(l.date)) + ')' : '') + '</td></tr>';
+          '<td class="muted small">' + (l && isOwner() ? 'last ' + (l.packs !== '' && l.packs != null && l.packSize ? esc(l.packs) + ' × ' + esc(l.packSize) + ' = ' : '') + esc(l.qty) + ' ' + esc(l.unit || '') + ' (' + esc(short(l.date)) + ')' : '') + '</td></tr>';
       }).join('') + '</table></div>';
     }).join('') +
-    '<div class="card"><h2>Something not on the list?</h2><table class="t" id="i_new"></table><button class="btn soft sm" id="i_addrow" type="button">+ Add another</button></div>' +
+    '<div class="card scroll"><h2>Something not on the list?</h2><table class="t" id="i_new"></table><button class="btn soft sm" id="i_addrow" type="button">+ Add another</button></div>' +
     '<div class="bar"><button class="btn" id="i_save">Save count</button></div>' +
-    '<datalist id="dl_iu">' + units.map(function (u) { return '<option value="' + esc(u) + '">'; }).join('') + '</datalist>');
-  var catOpts = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Packaging', 'Cleaning products', 'Other'])));
-  function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Name, e.g. Bleach" data-k="name"></td><td style="width:110px"><input placeholder="How many" inputmode="decimal" data-k="qty"></td><td style="width:110px"><input placeholder="Unit" data-k="unit" list="dl_iu"></td><td><select data-k="cat">' + catOpts.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); }
+    '<datalist id="dl_pt">' + types.map(function (u) { return '<option value="' + esc(u) + '">'; }).join('') + '</datalist>');
+  var catOpts = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Cleaning products', 'Other'])));
+  function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Name, e.g. Sugar" data-k="name"></td>' + line({}) + '<td><select data-k="cat">' + catOpts.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); wire(tr); }
   $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>');
-  addRow(); $('#i_addrow').onclick = addRow;
-  // highlight anything at or below its reorder level as it's counted
+  function read(tr) {
+    var g = function (k) { return tr.querySelector('[data-k=' + k + ']').value.trim(); };
+    var n = num(g('qty')), size = num(g('psize')), type = g('ptype'), su = g('sunit');
+    var c = { packs: n, packType: type, packSize: size, sizeUnit: su };
+    if (n === '') { c.qty = ''; return c; }
+    if (size !== '' && size > 0) { c.qty = Math.round(n * size * 1000) / 1000; c.unit = su; } else { c.qty = n; c.unit = type || 'units'; }
+    return c;
+  }
+  // show the total and highlight anything at or below its reorder level as it's counted
   function check(tr) {
-    var q = num(tr.querySelector('[data-k=qty]').value), re = tr.dataset.re, b = tr.querySelector('[data-reorder]');
-    var low = re !== '' && q !== '' && q <= Number(re);
+    var c = read(tr), t = tr.querySelector('[data-t=tot]');
+    if (t) t.textContent = c.qty !== '' && c.packSize !== '' && c.packSize > 0 ? '= ' + c.qty + ' ' + c.unit : '';
+    var re = tr.dataset.re, b = tr.querySelector('[data-reorder]');
+    var low = re !== undefined && re !== '' && c.packs !== '' && c.packs <= Number(re);
     tr.style.background = low ? '#fdecea' : '';
     if (b) { b.className = low ? 'btn sm' : 'btn soft sm'; b.style.background = low ? '#b3261e' : ''; b.textContent = low ? 'Reorder ‼' : 'Reorder'; }
   }
-  $$('tr[data-ing]').forEach(function (tr) { tr.querySelector('[data-k=qty]').addEventListener('input', function () { check(tr); }); });
+  function wire(tr) { $$('input,select', tr).forEach(function (e) { e.addEventListener('input', function () { check(tr); }); e.addEventListener('change', function () { check(tr); }); }); }
+  $$('tr[data-ing]').forEach(wire);
+  addRow(); $('#i_addrow').onclick = addRow;
   $$('[data-reorder]').forEach(function (b) {
     b.onclick = function () {
       var tr = b.closest('tr');
@@ -768,12 +789,12 @@ ROUTES.ingstock = function () {
     };
   });
   $('#i_save').onclick = function () {
-    var counts = $$('tr[data-ing]').map(function (tr) { return { ingredient: tr.dataset.ing, unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) }; }).filter(function (c) { return c.qty !== ''; });
-    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) counts.push({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), category: tr.querySelector('[data-k=cat]').value, unit: tr.querySelector('[data-k=unit]').value.trim(), qty: num(tr.querySelector('[data-k=qty]').value) === '' ? 0 : num(tr.querySelector('[data-k=qty]').value) }); });
+    var counts = $$('tr[data-ing]').map(function (tr) { return Object.assign({ ingredient: tr.dataset.ing }, read(tr)); }).filter(function (c) { return c.qty !== ''; });
+    $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) { var c = read(tr); if (c.qty === '') { c.qty = 0; c.packs = 0; c.unit = c.packSize ? c.sizeUnit : (c.packType || 'units'); } counts.push(Object.assign({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), category: tr.querySelector('[data-k=cat]').value }, c)); } });
     if (!counts.length) return toast('Nothing counted yet');
-    var notC = $$('tr[data-ing]').length - $$('tr[data-ing]').filter(function (tr) { return tr.querySelector('[data-k=qty]').value !== ''; }).length;
-    counts.forEach(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }); if (g && c.unit) g.countUnit = c.unit; });
-    record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by') || S.user, counts: counts }, 'Count saved' + (notC ? ' – ' + notC + ' item' + (notC > 1 ? 's' : '') + ' not counted' : ''));
+    var notC = $$('tr[data-ing]').length - counts.filter(function (c) { return !c.supplier && c.category === undefined; }).length;
+    counts.forEach(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }); if (g) { if (c.packType) g.packType = c.packType; if (c.packSize !== '') g.packSize = c.packSize; if (c.packSize !== '') g.countUnit = c.sizeUnit; } });
+    record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by') || S.user, counts: counts }, 'Count saved' + (notC > 0 ? ' – ' + notC + ' item' + (notC > 1 ? 's' : '') + ' not counted' : ''));
     location.hash = 'home';
   };
 };
