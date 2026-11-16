@@ -738,7 +738,7 @@ ROUTES.ingstock = function () {
   var sizeU = function (i) { return W.test(i.countUnit || '') ? i.countUnit : (W.test(i.unit || '') ? i.unit : 'kg'); };
   var cell = function (k, v, w, ph, extra) { return '<input data-k="' + k + '" value="' + esc(v == null ? '' : v) + '" style="width:' + w + 'px" placeholder="' + ph + '"' + (extra || '') + '>'; };
   var line = function (i) {
-    return '<td style="white-space:nowrap">' + cell('qty', '', 64, 'How many', ' inputmode="decimal"') + ' ' + cell('ptype', i.packType || '', 86, 'bags', ' list="dl_pt"') +
+    return '<td style="white-space:nowrap">' + cell('qty', '', 60, 'No.', ' inputmode="decimal"') + ' ' + cell('ptype', i.packType || '', 90, 'e.g. bags', ' list="dl_pt"') +
       ' <span class="muted">of</span> ' + cell('psize', i.packSize === '' || i.packSize == null ? '' : i.packSize, 60, 'size', ' inputmode="decimal"') + ' ' +
       '<select data-k="sunit" style="width:70px">' + ['kg', 'g', 'L', 'ml'].map(function (u) { return '<option' + (u.toLowerCase() === String(sizeU(i)).toLowerCase() ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select>' +
       ' <b data-t="tot" class="small"></b></td>';
