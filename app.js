@@ -90,6 +90,7 @@ function sync(manual) {
   if (S.syncing || !navigator.onLine) { if (manual && !navigator.onLine) toast('No internet here – everything is kept on this device'); return; }
   S.syncing = true; paintSync();
   var batch = S.queue.slice(0, 25);
+  if (batch.length) S.oc = {};
   var req = batch.length
     ? fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ k: S.key, ops: batch }) })
     : fetch(API + '?a=data&k=' + encodeURIComponent(S.key));
@@ -344,13 +345,30 @@ function disp(n, q, u) {
   return { q: rq(n, q), unit: u };
 }
 function perOf(l) { return Number(l.per) || setN('Base mix litres', 300); }
-function ownerCall(body) { return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'owner', k: S.key, code: S.jcode }, body)) }).then(function (r) { return r.json(); }); }
+// Jonny's pages that only read: the answer is kept for a few minutes so going back to a page is instant.
+// Anything saved (on this device or by Jonny) clears the kept answers.
+var OREAD = { totals: 1, shop: 1, finance: 1, xmas: 1, weddings: 1, batches: 1 };
+function ownerCall(body) {
+  var key = OREAD[body.op] && !body.d ? body.op : null;
+  S.oc = S.oc || {};
+  if (key && S.oc[key] && Date.now() - S.oc[key].t < 300000) return S.oc[key].p;
+  if (!key && body.op && body.op !== 'office' && body.op !== 'fspack') S.oc = {};
+  var p = fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'owner', k: S.key, code: S.jcode }, body)) }).then(function (r) { return r.json(); });
+  if (key) { var c = S.oc[key] = { t: Date.now(), p: p }; p.then(function (x) { if (!x || !x.ok) { if (S.oc[key] === c) delete S.oc[key]; } }, function () { if (S.oc[key] === c) delete S.oc[key]; }); }
+  return p;
+}
+// get Jonny's other pages ready in the background once the office figures are in
+function ownPrefetch() {
+  if (!isOwner() || !navigator.onLine || Date.now() - (S.pfAt || 0) < 600000) return;
+  S.pfAt = Date.now();
+  ['totals', 'shop', 'finance', 'xmas', 'weddings'].forEach(function (op, i) { setTimeout(function () { if (isOwner()) ownerCall({ op: op }).catch(function () { }); }, 1500 + i * 400); });
+}
 // Jonny's office figures (sales, stock history, orders to confirm) – fetched with his passcode, never stored on the device
 function loadOwn(force) {
   if (!isOwner() || !navigator.onLine) return Promise.resolve(S.own || null);
   if (!force && S.own && Date.now() - S.ownAt < 90000) return Promise.resolve(S.own);
   if (S.ownP) return S.ownP;
-  S.ownP = ownerCall({ op: 'office' }).then(function (r) { S.ownP = null; if (r.ok) { S.own = r; S.ownAt = Date.now(); } return S.own || null; }).catch(function () { S.ownP = null; return S.own || null; });
+  S.ownP = ownerCall({ op: 'office' }).then(function (r) { S.ownP = null; if (r.ok) { S.own = r; S.ownAt = Date.now(); ownPrefetch(); } return S.own || null; }).catch(function () { S.ownP = null; return S.own || null; });
   return S.ownP;
 }
 function manager() { return set('Hours manager name') || 'Paul'; }
