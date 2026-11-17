@@ -174,6 +174,9 @@ function route() {
   if (!S.data) { render('<div class="card center"><h2>Getting things ready…</h2><p class="muted">This device needs the internet once to download the lists. After that it works without.</p></div>'); return; }
   var parts = (location.hash || '#home').slice(1).split('/');
   if (parts[0] !== 'hours') { S.hcode = null; S.hv = null; }
+  // names are now first names only – move anyone signed in under their old full name across
+  var stf = (D().staff || []).map(function (x) { return typeof x === 'string' ? x : x.name; });
+  if (S.user && stf.length && stf.indexOf(S.user) < 0 && stf.indexOf(S.user.split(' ')[0]) >= 0) { S.user = S.user.split(' ')[0]; localStorage.setItem(LS.user, S.user); }
   if (S.user && S.user === owner() && !S.jcode) { S.user = ''; localStorage.removeItem(LS.user); }
   if (S.user === owner() && S.jcode && !office() && !S.oTimer) ownerIdle();
   if (!S.user && parts[0] !== 'who') { location.hash = 'who'; return; }
@@ -311,7 +314,7 @@ function isDairy(n) { return /milk|cream/i.test(n) && !/powder/i.test(n); }
 function rq(n, q) { return q === '' || q == null || isNaN(Number(q)) ? q : isDairy(n) ? Math.round(Number(q)) : r2(Number(q), 3); }
 function inBase(q, u) { u = String(u || '').toLowerCase(); q = Number(q) || 0; return u === 'g' || u === 'ml' ? q / 1000 : q; }
 function byAmount(a, b) { return inBase(b.qty != null ? b.qty : b.amount, b.unit) - inBase(a.qty != null ? a.qty : a.amount, a.unit); }
-function owner() { return set('Owner name') || 'Jonny Campbell'; }
+function owner() { return set('Owner name') || 'Jonny'; }
 // Past batches: only Jonny, or Paul once he has entered his passcode
 function canPast() { return office() || isOwner() || (S.user === manager() && mgrOK()); }
 function pastBatches() { return office() ? (D().batches || []) : (S.allB || []); }
@@ -350,7 +353,7 @@ function loadOwn(force) {
   S.ownP = ownerCall({ op: 'office' }).then(function (r) { S.ownP = null; if (r.ok) { S.own = r; S.ownAt = Date.now(); } return S.own || null; }).catch(function () { S.ownP = null; return S.own || null; });
   return S.ownP;
 }
-function manager() { return set('Hours manager name') || 'Paul Stewart'; }
+function manager() { return set('Hours manager name') || 'Paul'; }
 function usesBase(f) { var i = (D().flavourInfo || []).find(function (x) { return x.name === f; }); return !i || i.base; }
 function recipeLines(flavour, mix) {
   var m = Number(mix) || 0;
