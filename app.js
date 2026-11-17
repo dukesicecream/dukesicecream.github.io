@@ -751,6 +751,17 @@ ROUTES.pest = function () {
 };
 
 /* ---------- deliveries in ---------- */
+// delivery item list in groups: base mix first (most common), then flavour ingredients, consumables, packaging
+function delGroups(ings) {
+  var base = (D().recipe || []).filter(function (r) { return r.flavour === 'All flavours (base mix)'; }).map(function (r) { return String(r.ingredient).toLowerCase(); });
+  var G = [['Base mix ingredients', []], ['Flavour ingredients', []], ['Consumables', []], ['Packaging', []]];
+  ings.filter(function (i) { return !i.hidden; }).forEach(function (i) {
+    var c = String(i.category || ''), k = base.indexOf(i.name.toLowerCase()) >= 0 || /dairy|dry goods/i.test(c) ? 0 : /packag/i.test(c) ? 3 : /clean|consum/i.test(c) ? 2 : 1;
+    G[k][1].push(i.name);
+  });
+  G.forEach(function (g) { g[1].sort(); });
+  return G.filter(function (g) { return g[1].length; });
+}
 ROUTES.deliveries = function () {
   var ings = D().ingredients || [];
   var suppliers = Array.from(new Set(ings.map(function (i) { return i.supplier; }).concat((D().lots || []).map(function (l) { return l.supplier; })).filter(Boolean))).sort();
@@ -766,8 +777,8 @@ ROUTES.deliveries = function () {
     '<p class="muted small">One line per item. Milk and cream: take the temperature (5 °C or below).</p>' +
     '<p><button class="btn soft" type="button" id="d_scan">📷 Scan the label</button> <button class="btn soft" type="button" id="d_inv">🧾 Scan the invoice</button><br><span class="muted small">fills in batch numbers and use-by dates</span></p><div id="d_invout"></div><div class="grid3">' +
     field('Date received', inp('d_date', keep.date, 'date')) +
-    field('Item', '<select id="d_pick"><option value="">Choose the item…</option>' + ings.filter(function (i) { return !i.hidden; }).map(function (i) { return i.name; }).sort().map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') + '<option value="__new">➕ New item…</option></select>' +
-      '<input id="d_item" placeholder="Name of the new item" style="display:none;margin-top:6px" autocomplete="off">') +
+    field('Item', '<select id="d_pick"><option value="">Choose the item…</option>' + delGroups(ings).map(function (g) { return '<optgroup label="' + esc(g[0]) + '">' + g[1].map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') + '</optgroup>'; }).join('') + '</select>') +
+    field('New item (if it\'s not on the list)', '<input id="d_item" placeholder="Type the name" autocomplete="off"><select id="d_cat" style="display:none;margin-top:6px"><option value="Dry goods">Base mix ingredient</option><option value="Flavouring" selected>Flavour ingredient</option><option value="Cleaning products">Consumable</option><option value="Packaging">Packaging</option></select>') +
     field('Supplier', inp('d_sup', keep.supplier, 'text', ' list="dl_sups"') + '<datalist id="dl_sups">' + suppliers.map(function (s) { return '<option value="' + esc(s) + '">'; }).join('') + '</datalist>') +
     field('Quantity', inp('d_qty', '', 'number')) +
     field('Unit', '<select id="d_unit"><option value=""></option>' + ['L', 'ml', 'kg', 'g', 'tubs', 'buckets', 'bags', 'boxes', 'bottles', 'jars', 'slabs', 'packs', 'rolls', 'units'].map(function (u) { return '<option>' + u + '</option>'; }).join('') + '</select>') +
@@ -782,10 +793,10 @@ ROUTES.deliveries = function () {
       return '<tr><td>' + esc(short(l.date)) + '</td><td>' + esc(l.item) + '<br><span class="muted small">' + esc(l.supplier || '') + '</span></td><td>' + esc(l.qty) + ' ' + esc(l.unit || '') + '</td><td>' + esc(l.batch) + '</td><td>' + esc(l.useBy ? short(l.useBy) : '') + '</td><td><button class="btn soft sm" data-fin="' + esc(l.id) + '">Used up</button></td></tr>';
     }).join('') || '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>') + '</table></div></div>');
   // picking an item fills in the supplier and unit from its last delivery, and 5 °C for chilled items (all can be changed)
+  $('#d_item').addEventListener('input', function () { var on = !!val('d_item'); $('#d_cat').style.display = on ? '' : 'none'; if (on) $('#d_pick').value = ''; });
   $('#d_pick').onchange = function () {
-    var v = this.value, isNew = v === '__new';
-    $('#d_item').style.display = isNew ? '' : 'none'; $('#d_item').value = isNew ? '' : v;
-    if (isNew) { $('#d_item').focus(); return; }
+    var v = this.value;
+    if (v) { $('#d_item').value = ''; $('#d_cat').style.display = 'none'; }
     var g = ings.find(function (i) { return i.name === v; }) || {};
     var last = (D().lots || []).filter(function (l) { return String(l.item).toLowerCase() === v.toLowerCase(); }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).pop() || {};
     $('#d_sup').value = last.supplier || g.supplier || '';
@@ -797,14 +808,14 @@ ROUTES.deliveries = function () {
     if (last.qty !== '' && last.qty != null) $('#d_qty').placeholder = 'last time ' + last.qty;
   };
   $('#d_save').onclick = function () {
-    var item = val('d_item') || (val('d_pick') !== '__new' ? val('d_pick') : '');
+    var item = val('d_item') || val('d_pick');
     if (!item) return toast('What was delivered?');
     if (!val('d_by')) $('#d_by').value = S.user;
     var isNewIng = !ings.some(function (i) { return i.name.toLowerCase() === item.toLowerCase(); });
     if (isNewIng && !confirm('"' + item + '" isn\'t on the ingredient list yet. Add it as a new item?')) return;
     var t = num(val('d_temp'));
     if (/milk|cream/i.test(item) && t === '' && !confirm('No temperature entered for a chilled item. Save anyway?')) return;
-    record('delivery', { id: uid(), date: val('d_date'), item: item, supplier: val('d_sup'), qty: num(val('d_qty')), unit: val('d_unit'), useBy: val('d_use'), temp: t, batch: val('d_batch'), comment: val('d_com'), by: val('d_by') },
+    record('delivery', { id: uid(), date: val('d_date'), item: item, category: isNewIng ? val('d_cat') : '', supplier: val('d_sup'), qty: num(val('d_qty')), unit: val('d_unit'), useBy: val('d_use'), temp: t, batch: val('d_batch'), comment: val('d_com'), by: val('d_by') },
       item + ' saved' + (t !== '' && /milk|cream/i.test(item) && t > 5 ? ' – temperature is above 5 °C, Jonny will be told' : ''));
     keepDraft('delivery', { date: val('d_date'), supplier: val('d_sup') });
     route(); setTimeout(function () { $('#d_pick').focus(); }, 50);
