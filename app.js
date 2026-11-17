@@ -259,6 +259,7 @@ ROUTES.home = function () {
   alerts += (D().orders || []).filter(function (o) { return o.status === 'Confirmed' || o.status === 'Packing'; }).map(function (o) {
     return big('📦', 'Shop order to pack: ' + o.shop, (o.small || 0) + ' small, ' + (o.large || 0) + ' large · ' + o.no + (o.status === 'Packing' ? ' · started' : ''), '#packing/' + encodeURIComponent(o.no), 'Pack it');
   }).join('');
+  if (mine && navigator.onLine && (!S.wv || S.wvFor !== S.user || Date.now() - S.wvAt > 60000)) setTimeout(loadWed, 1500);
   if (mine && navigator.onLine && (!S.own || Date.now() - S.ownAt > 90000)) loadOwn().then(function (x) { if (x && (location.hash || '#home') === '#home' && !(waiting || []).length && (x.insights.waiting || []).length) route(); });
   var unsent = S.queue.length, fs = fscDue();
   var fsBtn = fs.length ? big('🛡️', 'Food safety checks', fs.length + ' to do: ' + fs.map(function (o) { return o[3]; }).join(' · '), '#fsc', 'Start') : '';
@@ -358,6 +359,46 @@ function recipeLines(flavour, mix) {
     return { ingredient: r.ingredient, qty: m ? d.q : '', unit: d.unit, batch: lot ? lot.batch : '', useBy: lot ? lot.useBy : '' };
   }).sort(byAmount);
 }
+/* ---------- the recipe card shown when a batch is started ---------- */
+function fmtN(n) { n = Number(n); var w = Math.floor(n + 1e-9), f = n - w; var fr = Math.abs(f - 0.5) < 0.01 ? '½' : Math.abs(f - 0.25) < 0.01 ? '¼' : Math.abs(f - 0.75) < 0.01 ? '¾' : ''; return fr ? (w ? w : '') + fr : String(r2(n, 2)); }
+function plural(n, w) { return Number(n) === 1 || !w ? w : /(ch|sh|x|s)$/.test(w) ? w + 'es' : w + 's'; }
+function wt(q, u) { var lu = String(u).toLowerCase(); if (lu === 'kg' && q < 1) return Math.round(q * 1000) + ' g'; if (lu === 'g' && q >= 1000) return r2(q / 1000, 3) + ' kg'; return (lu === 'kg' || lu === 'l' ? r2(q, 3) : Math.round(q)) + ' ' + u; }
+// "36 kg – 12 × 3 kg tubs", "12 kg – 4 buckets", "4.8 kg – 1 bucket + 1.8 kg"
+function packText(name, q, unit) {
+  var ing = (D().ingredients || []).find(function (i) { return String(i.name).toLowerCase() === String(name).toLowerCase(); }) || {};
+  var lu = String(unit || '').toLowerCase(), iu = String(ing.unit || unit || '').toLowerCase();
+  if (/cream/i.test(name) && !/powder/i.test(name) && lu === 'l') { var cl = setN('Cream pack litres', 4), j = Math.ceil(q / cl - 0.001); return { main: Math.round(q * 10) / 10 + ' L', packs: j + ' × ' + cl + ' L jar' + (j === 1 ? '' : 's') }; }
+  if (/milk/i.test(name) && !/powder/i.test(name) && lu === 'l') {
+    var bx = setN('Milk box litres', 13.65), sp = setN('Milk box max spare (litres)', 0.5), b = Math.floor(q / bx + 1e-9), rem = q - b * bx, jars = 0;
+    if (rem > 0.01) { if (bx - rem <= sp) b++; else jars = Math.ceil(rem / 2 - 1e-9); }
+    return { main: Math.round(q * 10) / 10 + ' L', packs: (b ? b + ' ' + plural(b, 'box') + ' (' + bx + ' L)' : '') + (b && jars ? ' + ' : '') + (jars ? jars + ' × 2 L jar' + (jars === 1 ? '' : 's') : '') };
+  }
+  var ps = Number(ing.packSize) || 0, pt = ing.packType || '';
+  var qi = lu === iu ? q : lu === 'g' && iu === 'kg' ? q / 1000 : lu === 'kg' && iu === 'g' ? q * 1000 : lu === 'ml' && iu === 'l' ? q / 1000 : q;
+  var main = /^(kg|g|l|ml)$/.test(lu) ? wt(q, unit) : fmtN(q) + ' ' + plural(q, String(unit).replace(/s$/, ''));
+  if (!ps || !pt) return { main: main, packs: '' };
+  if (!/^(kg|g|l|ml)$/.test(iu)) { var nb = Math.round(qi / ps * 4) / 4; return { main: main, packs: '≈ ' + fmtN(nb) + ' ' + plural(nb, pt) + ' once chopped' }; }
+  var n = qi / ps, whole = Math.floor(n + 0.03), left = qi - whole * ps;
+  if (Math.abs(left) < ps * 0.03 && whole) return { main: main, packs: whole + ' × ' + ps + ' ' + iu + ' ' + plural(whole, pt) };
+  if (!whole) return { main: main, packs: '' };
+  return { main: main, packs: whole + ' ' + plural(whole, pt) + ' + ' + wt(left, iu) };
+}
+function recipeCard(flavour, mix) {
+  if (!flavour || !(Number(mix) > 0)) return '';
+  var m = Number(mix), wb = usesBase(flavour), R = D().recipe || [];
+  var base = wb ? R.filter(function (r) { return r.flavour === 'All flavours (base mix)'; }) : [], fl = R.filter(function (r) { return r.flavour === flavour; });
+  var baseNames = base.map(function (r) { return String(r.ingredient).toLowerCase(); });
+  var line = function (r, extra) {
+    var q = r.amount / perOf(r) * m, p = packText(r.ingredient, q, r.unit);
+    return '<tr' + (extra ? ' style="background:#fff4c2"' : '') + '><td style="padding:8px 6px"><b>' + esc(r.ingredient) + '</b>' + (extra ? ' <span class="pill warn">EXTRA – on top of the base mix</span>' : '') + '</td><td style="padding:8px 6px;font-size:18px;white-space:nowrap"><b>' + esc(p.main) + '</b></td><td style="padding:8px 6px">' + esc(p.packs) + '</td></tr>';
+  };
+  var info = (D().flavourInfo || []).find(function (x) { return x.name === flavour; }) || {};
+  var sorted = function (a) { return a.slice().sort(function (x, y) { return inBase(y.amount / perOf(y), y.unit) - inBase(x.amount / perOf(x), x.unit); }); };
+  return '<div class="card" id="b_recipe" style="border:2px solid #1c2140"><h2>📖 ' + esc(flavour) + ' – ' + esc(fmtN(m)) + ' L</h2>' +
+    (base.length ? '<h3 style="margin:6px 0">Base mix</h3><table class="t" style="width:100%">' + sorted(base).map(function (r) { return line(r, false); }).join('') + '</table>' : '') +
+    (fl.length ? '<h3 style="margin:12px 0 6px">' + (wb ? 'Then add for ' + esc(flavour) : 'Recipe') + '</h3><table class="t" style="width:100%">' + sorted(fl).map(function (r) { return line(r, baseNames.indexOf(String(r.ingredient).toLowerCase()) >= 0); }).join('') + '</table>' : (wb ? '<p class="muted">No extra ingredients saved for ' + esc(flavour) + ' yet.</p>' : '')) +
+    (info.notes ? '<div style="background:#fff4d6;border:2px solid #b58a00;border-radius:8px;padding:8px 10px;margin-top:10px">📝 ' + esc(info.notes).replace(/\n/g, '<br>') + '</div>' : '') + '</div>';
+}
 ROUTES.production = function () {
   var bs = (D().batches || []).slice().sort(function (a, b) { return Number(b.no) - Number(a.no); });
   var open = bs.filter(function (b) { return b.status === 'Pasteurised'; });
@@ -416,13 +457,15 @@ ROUTES.batch = function (no) {
   render(back('production', 'Production') + '<h1>' + (isNew ? 'New batch' : 'Batch ' + esc(x.no)) + '</h1>' +
     (draft ? '<div class="hint noprint">Carrying on from where this was left. <a href="#" id="discard">Start again</a></div>' : '') +
     (isNew && !draft && planMix ? '<div class="hint noprint">Filled in from this week\'s batch plan (' + esc(planMix) + ' L' + (planFl ? ', ' + esc(planFl) : '') + '). Ingredient batch numbers come from the deliveries – check them and fill in the pasteurisation.</div>' : '') +
-    '<div class="card"><h2>Batch</h2><div class="grid2">' +
+    '<div class="card"><div class="grid2">' +
     field('Flavour', sel('b_flavour', (D().flavours || []).concat(x.flavour && (D().flavours || []).indexOf(x.flavour) < 0 ? [x.flavour] : []).concat([{ v: '__other', t: 'Other – new / limited edition…' }]), x.flavour, 'Choose a flavour…')) +
     field('Batch number', inp('b_no', x.no, 'text', isNew ? '' : ' readonly')) +
     field('Date produced', inp('b_date', x.date, 'date')) +
-    field('Mix made (litres)', inp('b_mix', x.mix, 'number')) + '</div>' +
-    '<h3>Ingredients</h3><p class="muted small">Amounts are worked out from the recipe for the litres above. Batch numbers are filled in from deliveries (oldest first) – change anything that\'s different.</p>' +
-    '<div class="scroll"><table class="t" id="b_lines"></table></div><button class="btn soft sm" id="b_add" type="button">+ Add ingredient</button> <button class="btn soft sm" id="b_recalc" type="button">Recalculate from recipe</button></div>' +
+    field('Mix made (litres)', inp('b_mix', x.mix, 'number')) + '</div></div>' +
+    '<div id="b_rcard">' + recipeCard(x.flavour, x.mix) + '</div>' +
+    '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0">Ingredient batch numbers</h2><button class="btn soft sm noprint" id="b_edit" type="button">✏️ Edit</button></div>' +
+    '<p class="muted small">Filled in from the deliveries (oldest first). If more or less of something was used (brownies, caramel, Biscoff crumb), tap Edit and change the amount – the recipe updates for next time.</p>' +
+    '<div class="scroll"><table class="t" id="b_lines"></table></div><div id="b_editbtns" style="display:none"><button class="btn soft sm" id="b_add" type="button">+ Add ingredient</button> <button class="btn soft sm" id="b_recalc" type="button">Recalculate from recipe</button></div></div>' +
     '<div class="card"><h2>Pasteurisation</h2><div class="grid3">' +
     field('Start time', '<span style="display:flex;gap:6px">' + inp('b_start', x.start, 'time') + '<button class="btn soft sm noprint" type="button" id="b_startnow">Now</button></span>') +
     field('Temperature reached °C (at least ' + setN('Pasteurisation minimum °C', 65) + ')', inp('b_temp', x.temp, 'number')) +
@@ -437,7 +480,7 @@ ROUTES.batch = function (no) {
     field('Tubbed by', staffSel('b_tby', x.tby || '')) + '</div>' +
     tubRow('Small tubs (150ml)', [['b_strays', tc.sTrays, 'full trays'], '× ' + setN('Small tubs per tray', 48) + ' in a tray  +', ['b_sloose', tc.sLoose, 'loose tubs']], 'b_stot', 'small tubs') +
     tubRow('Big tubs (500ml)', [['b_lhigh', tc.lHigh, 'tubs high'], '×', ['b_lstacks', tc.lStacks, 'stacks'], '+', ['b_lodd', tc.lOdd, 'odd tubs']], 'b_ltot', 'big tubs') +
-    tubRow('Napolis', [['b_nhigh', tc.nHigh, 'high'], '×', ['b_nstacks', tc.nStacks, 'stacks'], '+', ['b_nodd', tc.nOdd, 'odd']], 'b_ntot', 'Napolis') +
+    '<div class="grid2" style="margin-top:12px">' + field('Number of Napolis', inp('b_nodd', x.napolis !== '' && x.napolis != null ? x.napolis : (tc.nOdd == null ? '' : tc.nOdd), 'number')) + '</div><span id="b_ntot" hidden></span>' +
     '<div class="grid2" style="margin-top:12px">' + field('Weight of a filled small tub (g)', inp('b_sw', x.sw, 'number')) + field('Weight of a filled big tub (g)', inp('b_lw', x.lw, 'number')) + '</div>' +
     (isOwner() && !isNew ? (function () { var o = overrun(x); return '<div class="hint" style="margin-top:8px">🌬️ <b>Overrun</b> (only you see this): ' + (o.yield != null ? 'from tubs made <b>' + o.yield + '%</b>' : 'from tubs made – once the tubs are counted') + ' · ' + (o.weight != null ? 'from tub weights <b>' + o.weight + '%</b>' : 'from tub weights – once a tub is weighed') + (set('Empty small tub weight (g)') === '' ? '<br><span class="small muted">Put the empty tub weights on the Settings tab so the weight figure is exact.</span>' : '') + '</div>'; })() : '') +
     calcLine +
@@ -446,7 +489,14 @@ ROUTES.batch = function (no) {
     '<div class="card">' + field('Comments', '<textarea id="b_comments">' + esc(x.comments || '') + '</textarea>') + '</div>' +
     '<div class="bar noprint">' + (isNew ? '' : '<button class="btn alt" type="button" onclick="window.print()">Print</button>') + '<button class="btn" id="b_save" type="button">Save batch</button></div>');
 
+  var editing = false;
   function drawLines() {
+    if (!editing) {
+      $('#b_lines').innerHTML = '<tr><th>Ingredient</th><th>Amount</th><th>Batch no</th><th>Use by</th></tr>' + lines.filter(function (l) { return l.ingredient; }).map(function (l) {
+        return '<tr><td>' + esc(l.ingredient) + '</td><td>' + esc(l.qty) + ' ' + esc(l.unit) + '</td><td>' + (l.batch ? esc(l.batch) : '<span class="muted">–</span>') + '</td><td>' + (l.useBy ? esc(short(l.useBy)) : '<span class="muted">–</span>') + '</td></tr>';
+      }).join('');
+      return;
+    }
     $('#b_lines').innerHTML = '<tr><th>Ingredient</th><th>Amount</th><th>Unit</th><th>Batch no</th><th>Use by</th><th></th></tr>' + lines.map(function (l, i) {
       var lots = lotsFor(l.ingredient); dl[i] = lots;
       return '<tr><td><input data-i="' + i + '" data-k="ingredient" value="' + esc(l.ingredient) + '" list="dl_ing"></td>' +
@@ -466,6 +516,7 @@ ROUTES.batch = function (no) {
     $$('#b_lines [data-del]').forEach(function (e) { e.onclick = function () { lines.splice(Number(e.dataset.del), 1); drawLines(); dirty(); }; });
   }
   function recalc() {
+    $('#b_rcard').innerHTML = recipeCard(val('b_flavour'), val('b_mix'));
     var fresh = recipeLines(val('b_flavour'), val('b_mix'));
     fresh.forEach(function (f) { var old = lines.find(function (l) { return l.ingredient === f.ingredient; }); if (old && old.batch) { f.batch = old.batch; f.useBy = old.useBy; } });
     lines.filter(function (l) { return !fresh.some(function (f) { return f.ingredient === l.ingredient; }) && l.ingredient && l.qty !== '' && l._manual; }).forEach(function (l) { fresh.push(l); });
@@ -506,9 +557,10 @@ ROUTES.batch = function (no) {
   };
   $('#b_mix').onchange = function () { recalc(); dirty(); };
   $('#b_date').onchange = function () { $('#b_bb').value = bestBefore(val('b_date')); dirty(); };
+  $('#b_edit').onclick = function () { editing = !editing; this.textContent = editing ? '✓ Done' : '✏️ Edit'; $('#b_editbtns').style.display = editing ? '' : 'none'; drawLines(); };
   $('#b_add').onclick = function () { lines.push({ ingredient: '', qty: '', unit: '', batch: '', useBy: '', _manual: true }); drawLines(); };
   $('#b_recalc').onclick = function () { recalc(); dirty(); };
-  ['b_strays', 'b_sloose', 'b_lhigh', 'b_lstacks', 'b_lodd', 'b_nhigh', 'b_nstacks', 'b_nodd'].forEach(function (id) { $('#' + id).addEventListener('input', showTubs); }); showTubs();
+  ['b_strays', 'b_sloose', 'b_lhigh', 'b_lstacks', 'b_lodd', 'b_nodd'].forEach(function (id) { $('#' + id).addEventListener('input', showTubs); }); showTubs();
   $('#b_startnow').onclick = function () { var d = new Date(); $('#b_start').value = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); dirty(); };
   $('#b_tubnow').onclick = function () { $('#b_tub').value = today(); if (!val('b_tby')) $('#b_tby').value = S.user; dirty(); };
   if ($('#discard')) $('#discard').onclick = function (ev) { ev.preventDefault(); dropDraft('batch:' + no); route(); };
@@ -707,10 +759,11 @@ ROUTES.deliveries = function () {
   var sd = strathroyDue(), cp = sd && sd.cp, exp = sd && sd.exp;
   var expHtml = exp && exp.length ? '<div class="card" style="border:2px solid #1c2140"><h2>🥛 Strathroy delivery – ' + esc(nice(cp.delivery)) + '</h2><p class="muted small">Filled in from this week\'s order (milk is what the recipe needs – any extra jars are for home). Temperature is filled in as 5 °C – change it if the probe says different. Add the batch number and use by, then save.</p>' +
     '<div class="scroll"><table class="t"><tr><th>Item</th><th>Litres</th><th>Temp °C</th><th>Batch no</th><th>Use by</th><th>OK</th></tr>' + exp.map(function (r, i) {
-      return '<tr data-ex="' + i + '"><td><b>' + esc(r[0]) + '</b></td><td><input data-k="qty" inputmode="decimal" style="width:70px" value="' + esc(Math.round(r[1] * 100) / 100) + '"></td><td><input data-k="temp" inputmode="decimal" style="width:70px" value="5"></td><td><input data-k="batch" style="width:110px"></td><td><input data-k="use" type="date"></td><td><input type="checkbox" data-k="ok" checked style="width:22px;height:22px"></td></tr>';
+      return '<tr data-ex="' + i + '"><td><b>' + esc(r[0]) + '</b></td><td><input data-k="qty" inputmode="decimal" style="width:70px" value="' + esc(Math.round(r[1] * 100) / 100) + '"></td><td><input data-k="temp" inputmode="decimal" style="width:70px" value="5"></td><td><input data-k="batch" style="width:110px"></td><td><input data-k="use" type="date"></td><td><input type="checkbox" data-k="ok" checked style="width:22px;height:22px"> <button class="btn soft sm" type="button" data-scan="' + i + '" title="Scan the label">📷</button></td></tr>';
     }).join('') + '</table></div><button class="btn" id="d_exsave">Save Strathroy delivery</button></div>' : '';
   render(back() + '<h1>Deliveries in</h1>' + expHtml + '<div class="card"><h2>Record a delivery</h2>' +
-    '<p class="muted small">One line per item. Milk and cream: take the temperature (5 °C or below).</p><div class="grid3">' +
+    '<p class="muted small">One line per item. Milk and cream: take the temperature (5 °C or below).</p>' +
+    '<p><button class="btn soft" type="button" id="d_scan">📷 Scan the label</button> <span class="muted small">fills in the batch number and use-by date</span></p><div class="grid3">' +
     field('Date received', inp('d_date', keep.date, 'date')) +
     field('Item', inp('d_item', '', 'text', ' list="dl_ings" autocomplete="off"') + '<datalist id="dl_ings">' + ings.map(function (i) { return '<option value="' + esc(i.name) + '">'; }).join('') + '</datalist>') +
     field('Supplier', inp('d_sup', keep.supplier, 'text', ' list="dl_sups"') + '<datalist id="dl_sups">' + suppliers.map(function (s) { return '<option value="' + esc(s) + '">'; }).join('') + '</datalist>') +
@@ -754,6 +807,10 @@ ROUTES.deliveries = function () {
     toast('Strathroy delivery saved' + (warm.length ? ' – ' + warm.join(' & ') + ' above 5 °C, Jonny will be told' : '') + (rows.some(function (tr) { return tr.querySelector('[data-k=temp]').value === ''; }) ? ' (temperature missing on one line)' : ''));
     goNext('strathroy');
   };
+  var fillScan = function (r, b, u) { if (!r || !r.ok) return toast((r && r.error) || 'Could not read the label'); if (r.batch) b.value = r.batch; if (r.useBy) u.value = r.useBy; [b, u].forEach(function (e) { e.style.background = '#fff4c2'; });
+    toast(r.batch || r.useBy ? 'Read: ' + [r.batch && 'batch ' + r.batch, r.useBy && 'use by ' + nice(r.useBy)].filter(Boolean).join(', ') + ' – check it' : 'Couldn\'t find a batch number or date – type them in'); };
+  $('#d_scan').onclick = function () { scanPhoto(function (r) { fillScan(r, $('#d_batch'), $('#d_use')); }); };
+  $$('[data-scan]').forEach(function (bt) { bt.onclick = function () { var tr = bt.closest('tr'); scanPhoto(function (r) { fillScan(r, tr.querySelector('[data-k=batch]'), tr.querySelector('[data-k=use]')); }); }; });
   // remembers the last unit and quantity for an item
   $('#d_item').addEventListener('change', function () { var l = (D().lots || []).filter(function (x) { return String(x.item).toLowerCase() === val('d_item').toLowerCase(); }).pop(); if (l) { if (!val('d_unit') && l.unit) $('#d_unit').value = l.unit; if (!val('d_qty') && l.qty !== '' && l.qty != null) $('#d_qty').placeholder = 'last time ' + l.qty; } });
 };
@@ -1105,7 +1162,7 @@ ROUTES.office = function () {
   var mine = isOwner();
   var useLocal = mine && office() && D().insights;
   var go = function (data) { if ((location.hash || '').indexOf('#office') === 0) drawOffice(data, mine); };
-  if (mine && S.own && Date.now() - S.ownAt < 90000) return go(S.own);
+  if (mine && S.own) { go(S.own); if (Date.now() - S.ownAt > 90000 && navigator.onLine) loadOwn(true).then(function (x) { if (x && !$('#app').hasAttribute('data-dirty')) go(x); }); return; }
   if (!mine && !mgrOK()) return mgrSignIn('office');
   if (S.user === manager() && S.mgr && Date.now() - S.mgrAt < 90000) return go(S.mgr);
   if (!navigator.onLine) {
@@ -1119,6 +1176,12 @@ ROUTES.office = function () {
     .catch(function () { render(back() + '<h1>Office</h1><div class="card">No connection.</div>'); });
 };
 // Paul's passcode opens Office and Weddings; it's kept only in memory and forgotten after 5 minutes without use
+function loadWed() {
+  if (S.wedP) return S.wedP;
+  var p = isOwner() ? ownerCall({ op: 'weddings' }) : mgrCall({ op: 'weddings' });
+  S.wedP = p.then(function (r) { S.wedP = null; if (r.ok) { S.wv = r; S.wvAt = Date.now(); S.wvFor = S.user; } return r; }).catch(function () { S.wedP = null; return null; });
+  return S.wedP;
+}
 function mgrOK() { if (S.pcode && Date.now() - (S.pcodeAt || 0) < 5 * 60000 && S.pcodeFor === S.user) { S.pcodeAt = Date.now(); return true; } S.pcode = null; return false; }
 function mgrCall(body) { return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ a: 'office', k: S.key, by: S.user, code: S.pcode }, body)) }).then(function (r) { return r.json(); }); }
 function mgrSignIn(next) {
@@ -1216,13 +1279,16 @@ ROUTES.weddings = function (key) {
       location.hash = 'weddings';
     };
   };
-  if (S.wv && Date.now() - S.wvAt < 60000 && S.wvFor === S.user) return draw(S.wv);
-  if (!navigator.onLine) return draw(S.wvFor === S.user ? S.wv : null);
-  render(back() + '<h1>Weddings</h1><p class="muted center">Loading…</p>');
-  (mine ? ownerCall({ op: 'weddings' }) : mgrCall({ op: 'weddings' })).then(function (r) {
-    if (!r.ok) { if (r.needCode) { S.pcode = null; return route(); } toast(r.error || 'Could not open'); return draw(null); }
-    S.wv = r; S.wvAt = Date.now(); S.wvFor = S.user; draw(r);
-  }).catch(function () { draw(null); });
+  // show what's already here straight away, then refresh quietly in the background
+  var have = S.wv && S.wvFor === S.user;
+  if (have) { draw(S.wv); if (Date.now() - S.wvAt < 60000 || !navigator.onLine) return; }
+  else if (!navigator.onLine) return draw(null);
+  else render(back() + '<h1>Weddings</h1><p class="muted center">Loading…</p>');
+  loadWed().then(function (r) {
+    if (r && r.needCode) { S.pcode = null; return route(); }
+    if (!r || !r.ok) { if (!have) { toast((r && r.error) || 'Could not open'); draw(null); } return; }
+    if ((location.hash || '').indexOf('#weddings') === 0 && !$('#app').hasAttribute('data-dirty') && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) draw(r);
+  });
 };
 // Jonny's sales dashboard (Office). Built from the stock takes, shop orders and wedding records.
 var DASH_C = ['#2a78d6', '#eb6834', '#1baf7a'];
@@ -1468,6 +1534,44 @@ function drawShop() {
 }
 
 // Costs & prices (finance)
+// Takes a photo (or picks one), shrinks it and has Google read the writing on it
+function scanPhoto(cb) {
+  if (!navigator.onLine) return toast('Reading a photo needs the internet');
+  var f = document.createElement('input'); f.type = 'file'; f.accept = 'image/*'; f.setAttribute('capture', 'environment');
+  f.onchange = function () {
+    var file = f.files && f.files[0]; if (!file) return;
+    toast('Reading the photo…');
+    var img = new Image();
+    img.onload = function () {
+      var k = Math.min(1, 2000 / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(img.src);
+      fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'ocr', k: S.key, img: c.toDataURL('image/jpeg', 0.85).split(',')[1], mime: 'image/jpeg' }) })
+        .then(function (r) { return r.json(); }).then(cb).catch(function () { cb({ ok: false, error: 'No connection' }); });
+    };
+    img.onerror = function () { toast('Could not open that photo'); };
+    img.src = URL.createObjectURL(file);
+  };
+  f.click();
+}
+// Invoice photo: finds the lines that mention an ingredient or packaging item and suggests the price
+function invoiceMatches(text) {
+  var lines = String(text || '').split(/\n+/).map(function (l) { return l.trim(); }).filter(Boolean);
+  var money = function (l) { return (l.match(/£?\d{1,5}(?:,\d{3})*\.\d{2}\b/g) || []).map(function (x) { return Number(x.replace(/[£,]/g, '')); }); };
+  var words = function (n) { return String(n).toLowerCase().replace(/\(.*?\)/g, '').split(/[^a-z]+/).filter(function (w) { return w.length >= 4 && !/^(paste|cream|powder|tubs?|lids?|label|small|large|with|flavours?|plain|whole)$/.test(w); }); };
+  var out = [];
+  $$('tr[data-ing], tr[data-pk]').forEach(function (tr) {
+    var name = tr.dataset.ing || tr.dataset.pk, w = words(name); if (!w.length) return;
+    for (var i = 0; i < lines.length; i++) {
+      var low = lines[i].toLowerCase();
+      if (!w.every(function (x) { return low.indexOf(x) >= 0; })) continue;
+      var nums = money(lines[i]); for (var j = 1; j <= 2 && !nums.length && lines[i + j]; j++) nums = money(lines[i + j]);
+      if (!nums.length) continue;
+      var price = nums.length >= 2 ? nums[nums.length - 2] : nums[0];
+      out.push({ tr: tr, name: name, line: lines[i], price: price }); break;
+    }
+  });
+  return out;
+}
 ROUTES.finance = function () { ownLoad('Costs & prices', 'finance', drawFinance); };
 function drawFinance(r) {
   var f = r.flavours || [], m = function (n) { return gbp(n, n != null && n < 1 ? 3 : 2); };
@@ -1490,7 +1594,17 @@ function drawFinance(r) {
     ' · other costs ' + gbp(r.otherMonth, 0) + ' a month = ' + gbp(r.otherL, 3) + ' per litre (edit these on the <b>Other costs</b> tab of the Sheet).</div></div>' +
     '<div class="card"><h2>Ingredient prices</h2><p class="small muted">Type the price you pay for one pack – it\'s turned into a price per kg or litre.</p><div class="scroll"><table class="t">' + ingP + '</table></div></div>' +
     '<div class="card"><h2>Packaging prices</h2><div class="scroll"><table class="t">' + packP + '</table></div></div>' +
-    '<div class="bar"><button class="btn" id="fi_save">Save prices</button></div>');
+    '<div class="bar"><button class="btn soft" id="fi_scan" type="button">📷 Scan an invoice</button><button class="btn" id="fi_save">Save prices</button></div><div id="fi_read"></div>');
+  $('#fi_scan').onclick = function () {
+    scanPhoto(function (x) {
+      if (!x || !x.ok) return toast((x && x.error) || 'Could not read the invoice');
+      var m = invoiceMatches(x.text);
+      m.forEach(function (o) { var e = o.tr.querySelector('input'); if (e) { e.value = o.price; e.style.background = '#fff4c2'; } });
+      $('#fi_read').innerHTML = '<div class="card"><h2>From the invoice</h2>' + (m.length ? '<p class="small">Filled in (shaded yellow) – check each one is the price for <b>one pack</b>, ex VAT, then press Save prices.</p><table class="t">' + m.map(function (o) { return '<tr><td><b>' + esc(o.name) + '</b></td><td>' + gbp(o.price) + '</td><td class="small muted">' + esc(o.line) + '</td></tr>'; }).join('') + '</table>' : '<p class="muted">Nothing on the invoice matched an ingredient or packaging item.</p>') +
+        '<details class="small"><summary>Everything read from the photo</summary><pre style="white-space:pre-wrap">' + esc(x.text) + '</pre></details></div>';
+      $('#fi_read').scrollIntoView({ behavior: 'smooth' });
+    });
+  };
   $('#fi_save').onclick = function () {
     var ing = $$('tr[data-ing]').map(function (tr) { var a = tr.querySelector('[data-k=pack]'), b = tr.querySelector('[data-k=unit]'); return { name: tr.dataset.ing, perPack: a ? num(a.value) : '', perUnit: b ? num(b.value) : '' }; }).filter(function (x) { return x.perPack !== '' || x.perUnit !== ''; });
     var pack = $$('tr[data-pk]').map(function (tr) { return { item: tr.dataset.pk, price: num(tr.querySelector('[data-k=price]').value) }; }).filter(function (x) { return x.price !== ''; });
