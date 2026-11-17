@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Christmas pre-orders – Dukes Ultra Premium Ice Cream</title>
+<meta name="description" content="Pre-order big tubs of Dukes Ultra Premium Ice Cream for Christmas.">
+<link rel="icon" href="icon.svg">
+<style>
+  :root { --navy: #1c2140; --red: #b3262e; --green: #1f5f45; --ink: #1d2233; --muted: #6a6f80; --line: #e6e3dc; --cream: #fbf8f2; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: var(--ink); background: var(--cream); min-height: 100vh; }
+  #snow { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+  header { position: relative; z-index: 1; background: var(--navy); color: #fff; text-align: center; padding: 26px 16px 34px; overflow: hidden; }
+  header .logo { background: #fff; display: inline-block; border-radius: 14px; padding: 10px 18px 6px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  header svg.brand { width: min(280px, 70vw); height: auto; display: block; }
+  header h1 { font-weight: normal; letter-spacing: .5px; margin: 22px 0 6px; font-size: clamp(26px, 6vw, 38px); }
+  header p { margin: 0; opacity: .85; font-family: Arial, sans-serif; font-size: 15px; }
+  .holly { color: #d9b44a; letter-spacing: 6px; font-size: 14px; margin-top: 10px; font-family: Arial, sans-serif; }
+  main { position: relative; z-index: 1; max-width: 640px; margin: -18px auto 0; padding: 0 14px 140px; font-family: Arial, Helvetica, sans-serif; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 14px; box-shadow: 0 2px 10px rgba(28,33,64,.06); }
+  .card h2 { font-family: Georgia, serif; font-weight: normal; color: var(--navy); margin: 0 0 10px; font-size: 21px; }
+  .info { display: flex; gap: 12px; align-items: flex-start; }
+  .info .ic { font-size: 22px; line-height: 1; }
+  .muted { color: var(--muted); }
+  .small { font-size: 14px; }
+  .fl { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .fl:last-child { border-bottom: 0; }
+  .fl .n { font-size: 17px; }
+  .qty { display: flex; align-items: center; gap: 6px; }
+  .qty button { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--cream); font-size: 20px; color: var(--navy); cursor: pointer; }
+  .qty input { width: 54px; height: 38px; text-align: center; font-size: 17px; border: 1px solid var(--line); border-radius: 8px; }
+  .fl.on .n { font-weight: bold; color: var(--navy); }
+  label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 4px; }
+  input[type=text], input[type=email], input[type=tel], textarea { width: 100%; font-size: 16px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; }
+  textarea { min-height: 70px; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.06); }
+  .bar .in { max-width: 640px; margin: 0 auto; padding: 12px 14px; display: flex; align-items: center; gap: 12px; font-family: Arial, sans-serif; }
+  .tot { flex: 1; }
+  .tot b { font-size: 22px; color: var(--navy); }
+  .btn { background: var(--red); color: #fff; border: 0; border-radius: 10px; padding: 14px 20px; font-size: 16px; font-weight: bold; cursor: pointer; }
+  .btn[disabled] { opacity: .5; cursor: default; }
+  .note { background: #fff7e0; border: 1px solid #ecd28c; border-radius: 10px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; }
+  .done { text-align: center; }
+  .done .big { font-size: 46px; }
+  .hide { display: none; }
+  .err { color: var(--red); font-size: 14px; margin-top: 8px; }
+  .trap { position: absolute; left: -9999px; }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 20px; }
+  @media (prefers-reduced-motion: reduce) { #snow { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="snow"></canvas>
+<header>
+  <div class="logo">
+    <svg class="brand" viewBox="0 -30 520 283" role="img" aria-label="Dukes Ultra Premium Ice-Cream">
+      <image href="logo520.png" x="0" y="0" width="520" height="253"/>
+      <g transform="translate(446 30) rotate(-8)">
+        <path d="M-36 0 C-30 -22 -12 -40 10 -44 C28 -47 44 -40 54 -26 C46 -30 36 -30 30 -24 C26 -14 30 -6 34 0 Z" fill="#c8232c"/>
+        <path d="M-36 0 C-30 -22 -12 -40 10 -44 C20 -45 28 -43 34 -40 C16 -36 0 -24 -8 0 Z" fill="#e0343d" opacity=".6"/>
+        <rect x="-40" y="-6" width="78" height="14" rx="7" fill="#fff" stroke="#d9d9d9"/>
+        <circle cx="56" cy="-24" r="9" fill="#fff" stroke="#d9d9d9"/>
+      </g>
+    </svg>
+  </div>
+  <h1>Christmas pre-orders</h1>
+  <p>Big tubs of Dukes, ready to collect for Christmas</p>
+  <div class="holly">✦ ✦ ✦</div>
+</header>
+
+<main>
+  <div id="loading" class="card muted">Loading…</div>
+
+  <div id="closed" class="card hide"><h2>Orders aren't open yet</h2><p class="muted">Christmas pre-orders will open here soon – check back shortly.</p></div>
+
+  <div id="paidbox" class="card done hide"></div>
+
+  <form id="form" class="hide" autocomplete="on">
+    <div id="preview" class="note hide">Preview – this page isn't open to customers yet.</div>
+    <div id="cancelled" class="note hide">Your payment wasn't completed, so your order isn't confirmed yet. You can try again below.</div>
+    <div class="card">
+      <div id="intro" class="small" style="margin-bottom:12px"></div>
+      <div class="info"><span class="ic">🍦</span><div><b>Big tubs (500 ml)</b> – <span id="price"></span> each</div></div>
+      <div class="info" style="margin-top:10px"><span class="ic">🎁</span><div><b>Collection</b><br><span id="collection" class="muted"></span></div></div>
+      <div class="info hide" id="dlrow" style="margin-top:10px"><span class="ic">⏰</span><div><b>Order by</b> <span id="deadline"></span></div></div>
+    </div>
+
+    <div class="card">
+      <h2>Choose your flavours</h2>
+      <div id="flavours"></div>
+    </div>
+
+    <div class="card">
+      <h2>Your details</h2>
+      <label for="name">Name</label><input type="text" id="name" autocomplete="name" required>
+      <label for="email">Email</label><input type="email" id="email" autocomplete="email" required>
+      <label for="phone">Phone</label><input type="tel" id="phone" autocomplete="tel" required>
+      <label for="notes">Anything we should know? (optional)</label><textarea id="notes"></textarea>
+      <input type="text" id="website" class="trap" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <p class="small muted" style="margin:12px 0 0">Payment is taken in advance by card on a secure Stripe page. You'll get an email to confirm your order.</p>
+      <div id="err" class="err"></div>
+    </div>
+    <footer>Dukes Ultra Premium Ice Cream · Gortin, Co Tyrone</footer>
+  </form>
+</main>
+
+<div class="bar hide" id="bar"><div class="in">
+  <div class="tot"><span class="muted small" id="count">No tubs yet</span><br><b id="total">£0.00</b></div>
+  <button class="btn" id="go" disabled>Pay &amp; order</button>
+</div></div>
+
+<script>
+(function () {
+  var API = 'https://script.google.com/macros/s/AKfycbxcD25Bdz6Fxp2HMXvTZvDrPdgKXhX8TCnLVuo6fsYE0afOHNvqRk65b0YCS-s5YIp0/exec';
+  var q = new URLSearchParams(location.search), preview = q.has('preview'), info = null, qty = {};
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var gbp = function (n) { return '£' + Number(n || 0).toFixed(2); };
+  var show = function (id, on) { $(id).classList.toggle('hide', !on); };
+
+  // gentle snow
+  (function () {
+    var c = $('#snow'), x = c.getContext('2d'), f = [], W, H;
+    function size() { W = c.width = innerWidth; H = c.height = innerHeight; }
+    size(); addEventListener('resize', size);
+    for (var i = 0; i < 70; i++) f.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.6, s: .3 + Math.random() * .9, d: Math.random() * 6 });
+    (function tick() {
+      x.clearRect(0, 0, W, H); x.fillStyle = 'rgba(255,255,255,.85)';
+      f.forEach(function (p) { p.y += p.s; p.d += .01; p.x += Math.sin(p.d) * .35; if (p.y > H + 5) { p.y = -5; p.x = Math.random() * W; } x.beginPath(); x.arc(p.x, p.y, p.r, 0, 6.3); x.fill(); });
+      requestAnimationFrame(tick);
+    })();
+  })();
+
+  function totals() {
+    var n = 0; Object.keys(qty).forEach(function (k) { n += qty[k] || 0; });
+    $('#count').textContent = n ? n + ' big tub' + (n === 1 ? '' : 's') : 'No tubs yet';
+    $('#total').textContent = gbp(n * info.price);
+    $('#go').disabled = !n;
+    return n;
+  }
+  function draw() {
+    $('#price').textContent = gbp(info.price);
+    $('#collection').textContent = info.collection || 'Collection day and time to be confirmed';
+    if (info.deadline) { $('#deadline').textContent = info.deadline; show('#dlrow', true); }
+    $('#intro').innerHTML = esc(info.intro).replace(/\n/g, '<br>');
+    $('#flavours').innerHTML = info.flavours.map(function (f, i) {
+      return '<div class="fl" data-i="' + i + '"><span class="n">' + esc(f) + '</span><span class="qty"><button type="button" data-m="-1" aria-label="One less ' + esc(f) + '">−</button>' +
+        '<input type="number" inputmode="numeric" min="0" max="50" value="0" aria-label="How many ' + esc(f) + '"><button type="button" data-m="1" aria-label="One more ' + esc(f) + '">+</button></span></div>';
+    }).join('');
+    Array.prototype.forEach.call(document.querySelectorAll('.fl'), function (row) {
+      var f = info.flavours[Number(row.dataset.i)], inp = row.querySelector('input');
+      var set = function (v) { v = Math.max(0, Math.min(50, Math.floor(Number(v) || 0))); qty[f] = v; inp.value = v; row.classList.toggle('on', v > 0); totals(); };
+      Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) { b.onclick = function () { set((qty[f] || 0) + Number(b.dataset.m)); }; });
+      inp.oninput = function () { set(inp.value); };
+    });
+    show('#form', true); show('#bar', true); totals();
+  }
+  $('#go').onclick = function (e) {
+    e.preventDefault(); $('#err').textContent = '';
+    var d = { name: $('#name').value.trim(), email: $('#email').value.trim(), phone: $('#phone').value.trim(), notes: $('#notes').value.trim(), website: $('#website').value, items: qty };
+    if (!d.name || !d.email || !d.phone) { $('#err').textContent = 'Please fill in your name, email and phone number.'; $('#name').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    if (preview) d.preview = 'jonny';
+    var b = $('#go'); b.disabled = true; b.textContent = 'One moment…';
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'xmasorder', d: d }) })
+      .then(function (r) { return r.json(); }).then(function (r) {
+        if (!r.ok) throw new Error(r.error || 'Something went wrong');
+        if (r.url) { location.href = r.url; return; }
+        show('#form', false); show('#bar', false);
+        $('#paidbox').innerHTML = '<div class="big">🎄</div><h2>Thank you!</h2><p>' + esc(r.message || 'Your order is in.') + '</p>'; show('#paidbox', true); scrollTo(0, 0);
+      }).catch(function (er) { $('#err').textContent = er.message || 'No connection – please try again.'; b.disabled = false; b.textContent = 'Pay & order'; });
+  };
+
+  // coming back from the payment page
+  if (q.get('order') && !q.get('cancelled')) {
+    show('#loading', true);
+    var check = function (n) {
+      fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'xmascheck', id: q.get('order') }) }).then(function (r) { return r.json(); }).then(function (r) {
+        if (r.ok && !r.paid && n < 4) return setTimeout(function () { check(n + 1); }, 2500);
+        show('#loading', false);
+        $('#paidbox').innerHTML = r.ok && r.paid
+          ? '<div class="big">🎄</div><h2>Thank you, ' + esc(String(r.name).split(' ')[0]) + '!</h2><p>Your payment of <b>' + gbp(r.total) + '</b> has been received and order <b>' + esc(r.no) + '</b> is confirmed.</p><p class="small">' + esc(r.items).replace(/\n/g, '<br>') + '</p>' + (r.collection ? '<p><b>Collection:</b><br>' + esc(r.collection) + '</p>' : '') + '<p class="muted small">A confirmation email is on its way.</p>'
+          : '<h2>Payment not showing yet</h2><p class="muted">If you completed the payment, your confirmation email will arrive shortly. If not, please <a href="christmas.html">try again</a>.</p>';
+        show('#paidbox', true);
+      }).catch(function () { show('#loading', false); $('#paidbox').innerHTML = '<p>Couldn\'t check your payment – please refresh the page.</p>'; show('#paidbox', true); });
+    };
+    check(0);
+    return;
+  }
+  fetch(API + '?a=xmasinfo').then(function (r) { return r.json(); }).then(function (r) {
+    info = r; show('#loading', false);
+    if (!r.open && !preview) { show('#closed', true); return; }
+    if (!r.open) show('#preview', true);
+    if (q.get('cancelled')) show('#cancelled', true);
+    draw();
+  }).catch(function () { $('#loading').textContent = 'Couldn\'t load – please refresh the page.'; });
+})();
+</script>
+</body>
+</html>
