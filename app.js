@@ -266,7 +266,7 @@ ROUTES.home = function () {
   var fsBtn = fs.length ? big('🛡️', 'Food safety checks', fs.length + ' to do: ' + fs.map(function (o) { return o[3]; }).join(' · '), '#fsc', 'Start') : '';
   render('<h1>Hello ' + esc(S.user.split(' ')[0]) + '</h1>' +
     (unsent && !navigator.onLine ? '<div class="due"><span>📶</span><span>' + unsent + ' record' + (unsent > 1 ? 's are' : ' is') + ' saved on this device and will send when there\'s internet.</span></div>' : '') +
-    fsBtn + alerts +
+    fsBtn + xmasAlert() + alerts +
     myMessages().map(function (m) { return '<div class="due" style="background:#eef0f8;border-color:#c9cde3;color:#1c2140"><span>✉️</span><span style="flex:1"><b>' + esc(m.from) + (m.to === 'Everyone' ? ' (to everyone)' : '') + ':</b> ' + esc(m.text) + ' <span class="muted small">' + esc(short(m.remind || m.date)) + '</span></span><button class="btn soft sm" data-seen="' + esc(m.id) + '">✓ Seen</button></div>'; }).join('') +
     todoHtml(due, links) +
     '<div class="tiles" style="margin-top:14px">' + tiles.map(function (t) {
@@ -1623,6 +1623,13 @@ function invoiceLots(text) {
   return out;
 }
 /* ---------- Christmas pre-orders (staff see orders, Jonny also sees money and settings) ---------- */
+// home page warning when Christmas orders need more big tubs than will be in stock on collection day
+function xmasAlert() {
+  var x = D().xmas, bad = x && (x.flavours || []).filter(function (f) { return f.short > 0 || f.risk; });
+  if (!bad || !bad.length) return '';
+  return '<a href="#xmas" class="due" style="display:flex;gap:10px;background:#fdecea;border:2px solid #b3262e;color:#5a1712;text-decoration:none;border-radius:12px;padding:12px 14px;margin-bottom:12px"><span style="font-size:22px">🎄</span><span><b>Christmas orders – big tubs running short</b><br>' +
+    bad.map(function (f) { return esc(f.flavour) + ': ' + f.need + ' ordered, ' + (f.stock == null ? 'no stock count yet' : (f.short ? 'only ' + f.stock + ' in stock' : 'about ' + Math.max(0, f.atCollection) + ' left by collection at usual sales')) + ' – <b>make ' + f.makeMore + ' more</b>'; }).join('<br>') + '</span></a>';
+}
 ROUTES.xmas = function () {
   var mine = isOwner();
   if (!navigator.onLine) return render(back() + '<h1>🎄 Christmas orders</h1><div class="card">This page needs the internet.</div>');
@@ -1630,6 +1637,15 @@ ROUTES.xmas = function () {
   var load = mine ? ownerCall({ op: 'xmas' }) : fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'xmas', k: S.key }) }).then(function (r) { return r.json(); });
   load.then(function (r) { if (location.hash !== '#xmas') return; if (!r.ok) return toast(r.error || 'Could not open'); drawXmas(r, mine); }).catch(function () { toast('No connection'); });
 };
+function xmasTubTable(byF) {
+  if (!Object.keys(byF).length) return '';
+  var st = {}; ((D().xmas || {}).flavours || []).forEach(function (f) { st[f.flavour] = f; });
+  return '<h3>Big tubs ordered vs stock</h3><div class="scroll"><table class="t"><tr><th>Flavour</th><th>Ordered</th><th>In stock now</th><th>By collection</th><th></th></tr>' +
+    Object.keys(byF).sort(function (a, b) { return byF[b] - byF[a]; }).map(function (f) {
+      var s = st[f] || {}, bad = s.short > 0 || s.risk;
+      return '<tr' + (bad ? ' style="background:#fdecea"' : '') + '><td>' + esc(f) + '</td><td><b>' + byF[f] + '</b></td><td>' + (s.stock == null ? '<span class="muted">not counted</span>' : s.stock) + '</td><td>' + (s.atCollection == null ? '–' : Math.max(0, s.atCollection)) + (s.perWeek ? '<br><span class="small muted">sells ~' + s.perWeek + '/wk</span>' : '') + '</td><td>' + (bad ? '<b style="color:#b3262e">make ' + s.makeMore + ' more</b>' : '<span class="pill ok">OK</span>') + '</td></tr>';
+    }).join('') + '</table></div><p class="small muted">Stock is the last ice cream stock take plus tubs made since, less usual sales.' + ((D().xmas || {}).collection ? ' Collection: ' + esc(nice(D().xmas.collection)) + '.' : ' Add the collection date below to plan for it.') + '</p>';
+}
 function drawXmas(r, mine) {
   var o = r.orders || [], live = o.filter(function (x) { return x.paid || !mine; });
   var paid = o.filter(function (x) { return x.paid; }), byF = {}, tubs = 0;
@@ -1637,31 +1653,31 @@ function drawXmas(r, mine) {
   var money = mine ? paid.reduce(function (t, x) { return t + Number(x.total || 0); }, 0) : 0;
   var row = function (x) {
     return '<tr><td><b>' + esc(x.no) + '</b><br><span class="small muted">' + esc(short(x.date)) + '</span></td><td><b>' + esc(x.name) + '</b><br><a href="tel:' + esc(x.phone.replace(/[^\d+]/g, '')) + '">' + esc(x.phone) + '</a>' + (mine ? '<br><span class="small">' + esc(x.email) + '</span>' : '') + (x.notes ? '<br><i class="small">' + esc(x.notes) + '</i>' : '') + '</td>' +
-      '<td class="small">' + esc(x.items).replace(/\n/g, '<br>') + '</td><td>' + (x.paid ? '<span class="pill ok">Paid</span>' : '<span class="pill warn">' + esc(x.status) + '</span>') + (mine && x.total !== undefined ? '<br><span class="small">' + gbp(x.total) + '</span>' : '') + '</td>' +
+      '<td class="small">' + esc(x.items).replace(/\n/g, '<br>') + (mine && x.total !== undefined ? '<br><b>' + gbp(x.total) + '</b>' : '') + '</td>' +
       '<td><label class="tick" style="margin:0"><input type="checkbox" data-col="' + esc(x.id) + '"' + (x.collected ? ' checked' : '') + '> Collected</label></td></tr>';
   };
   var s = r.settings || {};
   var setup = !mine ? '' : '<div class="card"><h2>Order page</h2>' +
     '<p><a class="btn sm" target="_blank" href="' + esc(r.page) + '?preview=1">Preview the page ↗</a> <button class="btn soft sm" type="button" id="x_copy">Copy the link</button></p>' +
     '<label class="tick"><input type="checkbox" id="x_open"' + (s.open ? ' checked' : '') + '> <b>Orders open</b> – customers can order and pay</label>' +
-    '<div class="grid2">' + field('Price per big tub (£)', inp('x_price', s.price, 'number')) + field('Order by (optional)', inp('x_dl', s.deadline)) + '</div>' +
+    '<div class="grid2">' + field('Price per big tub (£)', inp('x_price', s.price, 'number')) + field('Order by (optional)', inp('x_dl', s.deadline)) + field('Collection date (for stock planning)', inp('x_cdate', s.cdate, 'date')) + '</div>' +
     field('Collection day, time and place', '<textarea id="x_col" placeholder="e.g. Tuesday 23 December, 10am – 4pm at the Dukes shop, Gortin">' + esc(s.collection) + '</textarea>') +
     field('A short note at the top of the page (optional)', '<textarea id="x_intro">' + esc(s.intro) + '</textarea>') +
     '<h3>Flavours on the page</h3><p class="small muted">Untick to hide one. Type a new flavour in the empty box to add it.</p><div id="x_fl">' +
     (r.flavours || []).concat([{ name: '', on: true }]).map(function (f) { return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon' + (f.on ? ' checked' : '') + ' style="width:22px;height:22px"><input data-fname value="' + esc(f.name) + '" placeholder="Add a flavour"></div>'; }).join('') +
     '</div><button class="btn soft sm" type="button" id="x_addfl">+ Another flavour</button>' +
     '<h3>Card payments</h3>' + (r.card ? '<p><span class="pill ok">Stripe connected</span> Payments are checked automatically and customers get a confirmation email.</p>' :
-      '<p class="small">Not connected yet. Make a free Stripe account, then in Stripe go to <b>Developers → API keys</b>, copy the <b>Secret key</b> (starts sk_live_) and paste it here yourself. Until then, orders are taken without payment.</p>') +
+      '<p class="small">Not connected yet. Make a free Stripe account, then in Stripe go to <b>Developers → API keys</b>, copy the <b>Secret key</b> (starts sk_live_) and paste it here yourself. Orders only appear here once they\'re paid.</p>') +
     field(r.card ? 'Replace the Stripe key' : 'Stripe secret key', '<input id="x_key" type="password" autocomplete="off" placeholder="sk_live_…">') +
     '<div class="bar"><button class="btn" id="x_save">Save</button></div></div>' +
-    '<div class="card"><h2>Message all customers</h2><div class="grid2">' + field('Send to', '<select id="x_who"><option value="paid">Everyone who has paid</option><option value="notcollected">Paid but not collected yet</option><option value="all">Everyone who started an order</option></select>') + field('Subject', inp('x_sub', 'Your Dukes Christmas order')) + '</div>' +
+    '<div class="card"><h2>Message all customers</h2><div class="grid2">' + field('Send to', '<select id="x_who"><option value="paid">Everyone who has ordered</option><option value="notcollected">Not collected yet</option></select>') + field('Subject', inp('x_sub', 'Your Dukes Christmas order')) + '</div>' +
     field('Message', '<textarea id="x_body" style="min-height:120px">Hi {name},\n\n</textarea>') + '<p class="small muted">{name} becomes their first name and {order} their order number. Replies come to you. Google allows about ' + esc(r.quota) + ' more emails today.</p>' +
     '<button class="btn" id="x_send" type="button">Send email</button> <button class="btn soft" id="x_phones" type="button">Copy phone numbers (for texts)</button></div>';
   render(back() + '<h1>🎄 Christmas orders</h1>' +
-    '<div class="card"><div class="tiles" style="grid-template-columns:repeat(' + (mine ? 3 : 2) + ',1fr)"><div class="tile"><b style="font-size:24px">' + paid.length + '</b><span>paid orders</span></div><div class="tile"><b style="font-size:24px">' + tubs + '</b><span>big tubs</span></div>' + (mine ? '<div class="tile"><b style="font-size:24px">' + gbp(money) + '</b><span>taken</span></div>' : '') + '</div>' +
+    '<div class="card"><div class="tiles" style="grid-template-columns:repeat(' + (mine ? 3 : 2) + ',1fr)"><div class="tile"><b style="font-size:24px">' + paid.length + '</b><span>orders</span></div><div class="tile"><b style="font-size:24px">' + tubs + '</b><span>big tubs</span></div>' + (mine ? '<div class="tile"><b style="font-size:24px">' + gbp(money) + '</b><span>taken</span></div>' : '') + '</div>' +
     (r.collection || s.collection ? '<p class="small"><b>Collection:</b> ' + esc(r.collection || s.collection) + '</p>' : '') +
-    (Object.keys(byF).length ? '<h3>Tubs to make</h3><table class="t">' + Object.keys(byF).sort(function (a, b) { return byF[b] - byF[a]; }).map(function (f) { return '<tr><td>' + esc(f) + '</td><td><b>' + byF[f] + '</b></td></tr>'; }).join('') + '</table>' : '') + '</div>' +
-    '<div class="card"><h2>Orders</h2>' + inp('x_find', '', 'search', ' placeholder="Search name or order no"') + '<div class="scroll"><table class="t" id="x_tab"><tr><th>Order</th><th>Customer</th><th>Tubs</th><th>Payment</th><th></th></tr>' + (o.map(row).join('') || '<tr><td colspan="5" class="muted">No orders yet.</td></tr>') + '</table></div>' +
+    xmasTubTable(byF) + '</div>' +
+    '<div class="card"><h2>Orders</h2>' + inp('x_find', '', 'search', ' placeholder="Search name or order no"') + '<div class="scroll"><table class="t" id="x_tab"><tr><th>Order</th><th>Customer</th><th>Tubs</th><th></th></tr>' + (o.map(row).join('') || '<tr><td colspan="4" class="muted">No paid orders yet.</td></tr>') + '</table></div>' +
     (mine ? '<button class="btn soft sm" id="x_ref" type="button">Check payments now</button>' : '') + '</div>' + setup);
   $('#x_find').oninput = function () { var q = this.value.toLowerCase(); $$('#x_tab tr').forEach(function (tr, i) { if (i) tr.style.display = tr.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none'; }); };
   $$('[data-col]').forEach(function (c) { c.onchange = function () {
@@ -1675,7 +1691,7 @@ function drawXmas(r, mine) {
   $('#x_addfl').onclick = function () { $('#x_fl').insertAdjacentHTML('beforeend', '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon checked style="width:22px;height:22px"><input data-fname placeholder="Add a flavour"></div>'); };
   $('#x_save').onclick = function () {
     var fl = $$('#x_fl > div').map(function (d) { return { name: d.querySelector('[data-fname]').value.trim(), on: d.querySelector('[data-fon]').checked }; }).filter(function (f) { return f.name; });
-    var d = { open: $('#x_open').checked, price: num(val('x_price')), deadline: val('x_dl'), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
+    var d = { open: $('#x_open').checked, price: num(val('x_price')), deadline: val('x_dl'), cdate: val('x_cdate'), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
     if (val('x_key')) d.stripeKey = val('x_key');
     if (d.open && !d.collection) return toast('Add the collection day and time before opening orders');
     this.disabled = true;
@@ -1688,7 +1704,7 @@ function drawXmas(r, mine) {
     ownerCall({ op: 'xmasEmail', d: { who: val('x_who'), subject: val('x_sub'), body: $('#x_body').value } }).then(function (x) { toast(x.ok ? 'Sent to ' + x.sent + ' customer' + (x.sent === 1 ? '' : 's') : (x.error || 'Not sent')); $('#x_send').disabled = false; }).catch(function () { toast('No connection'); $('#x_send').disabled = false; });
   };
   $('#x_phones').onclick = function () {
-    var w = val('x_who'), list = o.filter(function (x) { return w === 'all' || (x.paid && (w !== 'notcollected' || !x.collected)); }).map(function (x) { return x.phone; }).filter(Boolean);
+    var w = val('x_who'), list = o.filter(function (x) { return w !== 'notcollected' || !x.collected; }).map(function (x) { return x.phone; }).filter(Boolean);
     navigator.clipboard && navigator.clipboard.writeText(Array.from(new Set(list)).join(', ')).then(function () { toast(list.length + ' numbers copied'); });
   };
 }
