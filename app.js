@@ -766,26 +766,38 @@ ROUTES.deliveries = function () {
     '<p class="muted small">One line per item. Milk and cream: take the temperature (5 °C or below).</p>' +
     '<p><button class="btn soft" type="button" id="d_scan">📷 Scan the label</button> <button class="btn soft" type="button" id="d_inv">🧾 Scan the invoice</button><br><span class="muted small">fills in batch numbers and use-by dates</span></p><div id="d_invout"></div><div class="grid3">' +
     field('Date received', inp('d_date', keep.date, 'date')) +
-    field('Item', inp('d_item', '', 'text', ' list="dl_ings" autocomplete="off"') + '<datalist id="dl_ings">' + ings.map(function (i) { return '<option value="' + esc(i.name) + '">'; }).join('') + '</datalist>') +
+    field('Item', '<select id="d_pick"><option value="">Choose the item…</option>' + ings.filter(function (i) { return !i.hidden; }).map(function (i) { return i.name; }).sort().map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') + '<option value="__new">➕ New item…</option></select>' +
+      '<input id="d_item" placeholder="Name of the new item" style="display:none;margin-top:6px" autocomplete="off">') +
     field('Supplier', inp('d_sup', keep.supplier, 'text', ' list="dl_sups"') + '<datalist id="dl_sups">' + suppliers.map(function (s) { return '<option value="' + esc(s) + '">'; }).join('') + '</datalist>') +
     field('Quantity', inp('d_qty', '', 'number')) +
-    field('Unit', inp('d_unit', '', 'text', ' list="dl_units"') + '<datalist id="dl_units"><option value="L"><option value="kg"><option value="g"><option value="tubs"><option value="units"><option value="boxes"></datalist>') +
+    field('Unit', '<select id="d_unit"><option value=""></option>' + ['L', 'ml', 'kg', 'g', 'tubs', 'buckets', 'bags', 'boxes', 'bottles', 'jars', 'slabs', 'packs', 'rolls', 'units'].map(function (u) { return '<option>' + u + '</option>'; }).join('') + '</select>') +
     field('Use by / best before', inp('d_use', '', 'date')) +
     field('Batch / lot number', inp('d_batch', '')) +
-    field('Temperature °C (chilled items)', inp('d_temp', '', 'number')) +
+    field('Temperature °C (chilled items)', inp('d_temp', '', 'number', ' inputmode="decimal"')) +
     field('Checked by', staffSel('d_by')) + '</div>' +
     field('Comment (condition, anything wrong)', inp('d_com', '')) +
-    '<button class="btn" id="d_save">Save & add another</button></div>' +
+    '<button class="btn" id="d_save">Save & add another</button> <button class="btn soft sm" type="button" id="d_manage">Edit the item list</button></div><div id="d_list"></div>' +
     '<div class="card"><h2>In stock now (open lots)</h2><p class="muted small">Tap <b>Used up</b> when a lot is finished, so it isn\'t suggested on the next batch.</p><div class="scroll"><table class="t"><tr><th>Received</th><th>Item</th><th>Qty</th><th>Batch</th><th>Use by</th><th></th></tr>' +
     (open.map(function (l) {
       return '<tr><td>' + esc(short(l.date)) + '</td><td>' + esc(l.item) + '<br><span class="muted small">' + esc(l.supplier || '') + '</span></td><td>' + esc(l.qty) + ' ' + esc(l.unit || '') + '</td><td>' + esc(l.batch) + '</td><td>' + esc(l.useBy ? short(l.useBy) : '') + '</td><td><button class="btn soft sm" data-fin="' + esc(l.id) + '">Used up</button></td></tr>';
     }).join('') || '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>') + '</table></div></div>');
-  $('#d_item').onchange = function () {
-    var g = ings.find(function (i) { return i.name.toLowerCase() === val('d_item').toLowerCase(); });
-    if (g) { if (g.supplier && !val('d_sup')) $('#d_sup').value = g.supplier; if (g.unit && !val('d_unit')) $('#d_unit').value = g.unit; }
+  // picking an item fills in the supplier and unit from its last delivery, and 5 °C for chilled items (all can be changed)
+  $('#d_pick').onchange = function () {
+    var v = this.value, isNew = v === '__new';
+    $('#d_item').style.display = isNew ? '' : 'none'; $('#d_item').value = isNew ? '' : v;
+    if (isNew) { $('#d_item').focus(); return; }
+    var g = ings.find(function (i) { return i.name === v; }) || {};
+    var last = (D().lots || []).filter(function (l) { return String(l.item).toLowerCase() === v.toLowerCase(); }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).pop() || {};
+    $('#d_sup').value = last.supplier || g.supplier || '';
+    var u = last.unit || g.unit || '';
+    if (u && !Array.prototype.some.call($('#d_unit').options, function (o) { return o.value === u; })) $('#d_unit').insertAdjacentHTML('beforeend', '<option>' + esc(u) + '</option>');
+    $('#d_unit').value = u;
+    var chilled = /milk|cream|butter|yog|chill/i.test(v + ' ' + (g.category || '')) && !/powder/i.test(v) || (D().lots || []).some(function (l) { return l.item === v && l.temp !== '' && l.temp != null; });
+    $('#d_temp').value = chilled ? 5 : '';
+    if (last.qty !== '' && last.qty != null) $('#d_qty').placeholder = 'last time ' + last.qty;
   };
   $('#d_save').onclick = function () {
-    var item = val('d_item');
+    var item = val('d_item') || (val('d_pick') !== '__new' ? val('d_pick') : '');
     if (!item) return toast('What was delivered?');
     if (!val('d_by')) $('#d_by').value = S.user;
     var isNewIng = !ings.some(function (i) { return i.name.toLowerCase() === item.toLowerCase(); });
@@ -795,7 +807,18 @@ ROUTES.deliveries = function () {
     record('delivery', { id: uid(), date: val('d_date'), item: item, supplier: val('d_sup'), qty: num(val('d_qty')), unit: val('d_unit'), useBy: val('d_use'), temp: t, batch: val('d_batch'), comment: val('d_com'), by: val('d_by') },
       item + ' saved' + (t !== '' && /milk|cream/i.test(item) && t > 5 ? ' – temperature is above 5 °C, Jonny will be told' : ''));
     keepDraft('delivery', { date: val('d_date'), supplier: val('d_sup') });
-    route(); setTimeout(function () { $('#d_item').focus(); }, 50);
+    route(); setTimeout(function () { $('#d_pick').focus(); }, 50);
+  };
+  // take items you no longer buy off the list (they can be put back)
+  $('#d_manage').onclick = function () {
+    var box = $('#d_list'); if (box.innerHTML) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="card"><h2>Items on the delivery list</h2><p class="small muted">Remove anything you don\'t buy any more. Old records are kept.</p><table class="t">' +
+      ings.slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }).map(function (i) { return '<tr><td' + (i.hidden ? ' class="muted"' : '') + '>' + esc(i.name) + (i.hidden ? ' (removed)' : '') + '</td><td><button class="btn soft sm" type="button" data-hide="' + esc(i.name) + '" data-h="' + (i.hidden ? '' : '1') + '">' + (i.hidden ? 'Put back' : 'Remove') + '</button></td></tr>'; }).join('') + '</table></div>';
+    $$('[data-hide]').forEach(function (b) { b.onclick = function () {
+      var h = !!b.dataset.h, g = ings.find(function (i) { return i.name === b.dataset.hide; }); if (g) g.hidden = h;
+      record('ingHide', { name: b.dataset.hide, hidden: h }, b.dataset.hide + (h ? ' removed from the list' : ' put back'));
+      route(); setTimeout(function () { $('#d_manage').click(); }, 50);
+    }; });
   };
   $$('[data-fin]').forEach(function (b) { b.onclick = function () { record('lotStatus', { id: b.dataset.fin, status: 'Finished' }, 'Marked as used up'); route(); }; });
   if ($('#d_exsave')) $('#d_exsave').onclick = function () {
