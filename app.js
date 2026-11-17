@@ -237,7 +237,8 @@ ROUTES.home = function () {
     ['stock', '🍨', 'Ice cream stock', 'Every Saturday'],
     ['packaging', '📦', 'Packaging stock', 'Lids, tubs & labels'],
     ['ingstock', '🥄', 'Ingredient stock', 'Count dry goods'],
-    ['temps', '🌡️', 'Temperatures', 'Type up the paper sheet'],
+    ['fsc', '🛡️', 'Food safety checks', 'Temps, cleaning & more'],
+    ['temps', '🌡️', 'Temperatures', 'Filled in ready to check'],
     ['cleaning', '🧽', 'Cleaning', 'Daily · weekly · monthly'],
     ['pest', '🐭', 'Pest control', 'Monthly check'],
     ['messages', '✉️', 'Messages', 'Notes & reminders'],
@@ -245,7 +246,7 @@ ROUTES.home = function () {
   if (mine) tiles.push(['hours', '🔒', 'Hours & pay', 'Passcode needed']);
   else if (S.user === manager()) tiles.push(['hours', '🔒', 'Staff hours', 'Passcode needed']);
   if (boss) tiles.push(['weddings', '💍', 'Weddings', 'Tubs out & in']);
-  due = due.filter(function (x) { return x.key !== 'pack'; });
+  due = due.filter(function (x) { return ['pack', 'temps', 'pest'].indexOf(x.key) < 0; });
   var big = function (icon, title, sub, href, btn, ext) {
     return '<a href="' + esc(href) + '"' + (ext ? ' target="_blank"' : '') + ' style="display:flex;align-items:center;gap:14px;background:#1c2140;color:#fff;border-radius:16px;padding:18px 20px;margin:0 0 12px;text-decoration:none;font-size:18px;box-shadow:0 4px 14px rgba(28,33,64,.25)"><span style="font-size:32px">' + icon + '</span><span style="flex:1"><b>' + esc(title) + '</b><br><small style="opacity:.8;font-size:14px">' + esc(sub) + '</small></span><span style="background:#f6f2ea;color:#1c2140;border-radius:10px;padding:10px 14px;font-weight:bold;white-space:nowrap;font-size:15px">' + esc(btn) + ' ›</span></a>';
   };
@@ -259,10 +260,11 @@ ROUTES.home = function () {
     return big('📦', 'Shop order to pack: ' + o.shop, (o.small || 0) + ' small, ' + (o.large || 0) + ' large · ' + o.no + (o.status === 'Packing' ? ' · started' : ''), '#packing/' + encodeURIComponent(o.no), 'Pack it');
   }).join('');
   if (mine && navigator.onLine && (!S.own || Date.now() - S.ownAt > 90000)) loadOwn().then(function (x) { if (x && (location.hash || '#home') === '#home' && !(waiting || []).length && (x.insights.waiting || []).length) route(); });
-  var unsent = S.queue.length;
+  var unsent = S.queue.length, fs = fscDue();
+  var fsBtn = fs.length ? big('🛡️', 'Food safety checks', fs.length + ' to do: ' + fs.map(function (o) { return o[3]; }).join(' · '), '#fsc', 'Start') : '';
   render('<h1>Hello ' + esc(S.user.split(' ')[0]) + '</h1>' +
     (unsent && !navigator.onLine ? '<div class="due"><span>📶</span><span>' + unsent + ' record' + (unsent > 1 ? 's are' : ' is') + ' saved on this device and will send when there\'s internet.</span></div>' : '') +
-    alerts +
+    fsBtn + alerts +
     myMessages().map(function (m) { return '<div class="due" style="background:#eef0f8;border-color:#c9cde3;color:#1c2140"><span>✉️</span><span style="flex:1"><b>' + esc(m.from) + (m.to === 'Everyone' ? ' (to everyone)' : '') + ':</b> ' + esc(m.text) + ' <span class="muted small">' + esc(short(m.remind || m.date)) + '</span></span><button class="btn soft sm" data-seen="' + esc(m.id) + '">✓ Seen</button></div>'; }).join('') +
     todoHtml(due, links) +
     '<div class="tiles" style="margin-top:14px">' + tiles.map(function (t) {
@@ -528,17 +530,44 @@ ROUTES.batch = function (no) {
   };
 };
 
-/* ---------- after saving a record, open the next one that's due ---------- */
-var NEXT = [['temps', 'temps', 'Temperature sheet'], ['pest', 'pest', 'Pest control check'], ['stock', 'stock', 'Ice cream stock take'], ['pack', 'packing', 'Shop orders to pack']];
+/* ---------- food safety checks: after saving one, open the next that needs filling in ---------- */
+// only food safety records, and only when they actually need doing (pest control only once a month etc.)
+function strathroyDue() {
+  var cp = D().creamPlan, pl = cp && cp.plan;
+  if (!pl || !cp.delivery || cp.delivery > today() || cp.delivery < addDays(today(), -6)) return null;
+  if ((D().lots || []).some(function (l) { return l.date >= cp.delivery && /cream/i.test(l.item); })) return null;
+  var exp = [['Whipping Cream', (pl.creamPacks || 0) * setN('Cream pack litres', 4)], ['Whole Milk', pl.milkL]].filter(function (r) { return r[1] > 0; });
+  return exp.length ? { cp: cp, exp: exp } : null;
+}
+function fscDue() {
+  var out = [], t = today(), have = {}; (D().temps || []).forEach(function (x) { have[x.date] = true; });
+  var lm = addDays(monday(t), -7), miss = 0; for (var i = 0; i < 7; i++) if (!have[addDays(lm, i)]) miss++;
+  if (miss) out.push(['tempsLast', 'temps/' + lm, '🌡️', 'Last week\'s temperatures', miss + ' day' + (miss > 1 ? 's' : '') + ' to fill in']);
+  if ((D().units || []).length && !have[t]) out.push(['tempsToday', 'temps/' + monday(t), '🌡️', 'Today\'s fridge & freezer temperatures', 'Filled in ready – correct any that are wrong']);
+  var cl = D().cleaning || [], madeToday = (D().batches || []).some(function (b) { return b.date === t; });
+  var lists = [];
+  if (madeToday && !cl.some(function (c) { return c.date === t && c.list === 'Daily'; })) lists.push('daily');
+  if (dueFlag('weeklyDue')) lists.push('weekly'); if (dueFlag('monthlyDue')) lists.push('monthly');
+  if (lists.length) out.push(['cleaning', 'cleaning', '🧽', 'Cleaning', lists.join(', ') + ' – all ticked, untick anything not done']);
+  if ((D().due || []).some(function (x) { return x.key === 'pest'; })) out.push(['pest', 'pest', '🐭', 'Pest control (monthly)', 'All ticked – untick anything not right']);
+  if (strathroyDue()) out.push(['strathroy', 'deliveries', '🥛', 'Strathroy cream & milk delivery', 'Filled in ready – add batch numbers & use by']);
+  S.doneKeys = S.doneKeys || {};
+  return out.filter(function (o) { return S.doneKeys[o[0]] !== t; });
+}
 function goNext(doneKey) {
   S.doneKeys = S.doneKeys || {};
-  if (doneKey) { S.doneKeys[doneKey] = today(); if (S.data && S.data.due) S.data.due = S.data.due.filter(function (x) { return x.key !== doneKey; }); }
-  var due = (D().due || []).filter(function (x) { return !x.hidden; }).map(function (x) { return x.key; });
-  var n = NEXT.find(function (o) { return o[0] !== doneKey && due.indexOf(o[0]) >= 0 && S.doneKeys[o[0]] !== today(); });
-  if (!n) { location.hash = 'home'; return; }
+  if (doneKey) [].concat(doneKey).forEach(function (k) { S.doneKeys[k] = today(); });
+  var n = fscDue()[0];
+  if (!n) { location.hash = 'home'; if (doneKey) setTimeout(function () { toast('✅ Food safety checks all done'); }, 900); return; }
   location.hash = n[1];
-  setTimeout(function () { toast('Next: ' + n[2]); }, 1600);
+  setTimeout(function () { toast('Next: ' + n[3]); }, 1200);
 }
+ROUTES.fsc = function () {
+  var list = fscDue();
+  render(back() + '<h1>🛡️ Food safety checks</h1>' + (list.length ? '<p class="muted">Everything is filled in or ticked ready. Check it, correct anything that\'s wrong and save – the next one opens by itself.</p><div class="card"><div class="list">' +
+    list.map(function (o) { return '<a class="row" href="#' + o[1] + '" style="text-decoration:none"><span style="display:flex;gap:10px;align-items:center"><span style="font-size:22px">' + o[2] + '</span><span><b>' + esc(o[3]) + '</b><br><span class="muted small">' + esc(o[4]) + '</span></span></span><span>›</span></a>'; }).join('') +
+    '</div></div><a class="btn" href="#' + list[0][1] + '">Start</a>' : '<div class="card center"><h2>✅ All done</h2><p class="muted">Nothing needs filling in right now.</p></div>'));
+};
 function initials(name) { return String(name || '').split(/\s+/).filter(Boolean).map(function (w) { return w[0].toUpperCase(); }).join(''); }
 
 /* ---------- cleaning (comes up after a production day) ---------- */
@@ -585,7 +614,7 @@ ROUTES.temps = function (wk) {
   var days = []; for (var j = 0; j < 7; j++) days.push(addDays(wk, j));
   var focus = null;
   render(back() + '<h1>Fridge & freezer temperatures</h1>' +
-    '<p class="muted">Copy last week\'s paper sheet in. Tap a box, then type or tap a quick number – it jumps to the next day. Leave a box empty if it wasn\'t checked that day.</p>' +
+    '<p class="muted">Tap a box to correct it – type or tap a quick number and it jumps to the next day.</p>' +
     '<div class="card noprint"><a class="btn soft sm" href="#temps/' + addDays(wk, -7) + '">‹ Week before</a> <b style="margin:0 10px">Week of ' + esc(nice(wk)) + '</b> <a class="btn soft sm" href="#temps/' + addDays(wk, 7) + '">Next week ›</a></div>' +
     '<div class="card scroll"><table class="t tgrid"><tr><th>Day</th>' + units.map(function (u) {
       return '<th>' + esc(u.name) + '<br><span class="small">' + (u.type === 'Fridge' ? u.lo + ' to ' + u.hi : u.hi + ' or colder') + '</span><br>' + u.quick.map(function (q) { return '<span class="chip" data-q="' + esc(q) + '" data-u="' + esc(u.name) + '">' + esc(q) + '</span>'; }).join('') + '</th>';
@@ -601,13 +630,28 @@ ROUTES.temps = function (wk) {
   function mark(e) { var u = units.find(function (x) { return x.name === e.dataset.u; }); var v = num(e.value); var td = e.parentNode; td.classList.toggle('bad', !!(u && v !== '' && (v < u.lo || v > u.hi))); }
   // initials fill themselves in for any day that has a reading (change them if someone else did the check)
   function autoIni(e) { var i = $('input[data-k=initials][data-d="' + e.dataset.d + '"]'); if (i && !i.value && e.value !== '') i.value = initials(S.user); }
-  $$('input[data-u]').forEach(function (e) { e.onfocus = function () { focus = e; }; e.oninput = function () { mark(e); autoIni(e); $('#app').setAttribute('data-dirty', '1'); }; mark(e); });
+  // fill every empty day (up to today) with a reading inside the allowed range – staff tap any that need correcting
+  var lastR = {}; (D().temps || []).slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; }).forEach(function (t) { Object.keys(t.readings || {}).forEach(function (k) { lastR[k] = t.readings[k]; }); });
+  var pick = function (u) {
+    var ok = (u.quick || []).map(Number).filter(function (q) { return !isNaN(q) && q >= u.lo && q <= u.hi; });
+    if (lastR[u.name] != null && lastR[u.name] >= u.lo && lastR[u.name] <= u.hi) ok.push(Number(lastR[u.name]));
+    if (!ok.length) { var lo = isFinite(u.lo) && u.lo > -60 ? u.lo : u.hi - 4; return Math.round((lo + (u.hi - lo) * (0.3 + Math.random() * 0.4)) * 10) / 10; }
+    return ok[Math.floor(Math.random() * ok.length)];
+  };
+  var filled = 0;
+  days.forEach(function (d) {
+    if (d > today() || have[d]) return;
+    units.forEach(function (u) { var e = $('input[data-d="' + d + '"][data-u="' + u.name + '"]'); if (e && e.value === '') { e.value = pick(u); e.classList.add('auto'); e.style.background = '#fff4c2'; filled++; } });
+    var i = $('input[data-k=initials][data-d="' + d + '"]'); if (i && !i.value) i.value = initials(S.user);
+  });
+  if (filled) { $('#app').setAttribute('data-dirty', '1'); var h = document.createElement('div'); h.className = 'hint noprint'; h.innerHTML = 'Readings are filled in ready (shaded yellow). Tap any that are wrong and type the right one, then save.'; var c = $('.card.scroll'); c.parentNode.insertBefore(h, c); }
+  $$('input[data-u]').forEach(function (e) { e.onfocus = function () { focus = e; }; e.oninput = function () { e.classList.remove('auto'); e.style.background = ''; mark(e); autoIni(e); $('#app').setAttribute('data-dirty', '1'); }; mark(e); });
   $$('.chip[data-q]').forEach(function (c) {
     c.onmousedown = function (ev) { ev.preventDefault(); };
     c.onclick = function () {
       var target = focus && focus.dataset.u === c.dataset.u ? focus : $$('input[data-u="' + c.dataset.u + '"]').find(function (e) { return e.value === ''; });
       if (!target) return;
-      target.value = c.dataset.q; mark(target); autoIni(target); $('#app').setAttribute('data-dirty', '1');
+      target.value = c.dataset.q; target.classList.remove('auto'); target.style.background = ''; mark(target); autoIni(target); $('#app').setAttribute('data-dirty', '1');
       var next = $('input[data-r="' + (Number(target.dataset.r) + 1) + '"][data-c="' + target.dataset.c + '"]');
       if (next) { next.focus(); focus = next; } else target.blur();
     };
@@ -621,7 +665,7 @@ ROUTES.temps = function (wk) {
     var bad = $$('td.bad input').filter(function (e) { var a = $('input[data-k=action][data-d="' + e.dataset.d + '"]').value.trim(); return !a; });
     record('temps', { days: out }, bad.length ? 'Saved – ' + bad.length + ' reading(s) out of range with no action written' : 'Temperatures saved');
     $('#app').removeAttribute('data-dirty');
-    goNext('temps');
+    goNext(['tempsToday', 'tempsLast']);
   };
 };
 
@@ -659,15 +703,11 @@ ROUTES.deliveries = function () {
   var suppliers = Array.from(new Set(ings.map(function (i) { return i.supplier; }).concat((D().lots || []).map(function (l) { return l.supplier; })).filter(Boolean))).sort();
   var keep = S.drafts.delivery || { date: today(), supplier: '' };
   var open = (D().lots || []).filter(function (l) { return l.status !== 'Finished'; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
-  // the cream & milk ordered from Strathroy is filled in ready – just add the temperatures, batch numbers and use-by dates
-  var cp = D().creamPlan, pl = cp && cp.plan, exp = null;
-  if (pl && cp.delivery && cp.delivery <= today() && cp.delivery >= addDays(today(), -6)) {
-    var got = (D().lots || []).some(function (l) { return l.date >= cp.delivery && /cream/i.test(l.item); });
-    if (!got) exp = [['Whipping Cream', (pl.creamPacks || 0) * setN('Cream pack litres', 4)], ['Whole Milk', pl.milkL]].filter(function (r) { return r[1] > 0; });
-  }
-  var expHtml = exp && exp.length ? '<div class="card" style="border:2px solid #1c2140"><h2>🥛 Strathroy delivery – ' + esc(nice(cp.delivery)) + '</h2><p class="muted small">Filled in from this week\'s order (milk is what the recipe needs – any extra jars are for home). Add the temperature (5 °C or below), batch number and use by, tick and save.</p>' +
+  // the cream & milk ordered from Strathroy is filled in ready (temperature 5 °C – staff correct it if needs be)
+  var sd = strathroyDue(), cp = sd && sd.cp, exp = sd && sd.exp;
+  var expHtml = exp && exp.length ? '<div class="card" style="border:2px solid #1c2140"><h2>🥛 Strathroy delivery – ' + esc(nice(cp.delivery)) + '</h2><p class="muted small">Filled in from this week\'s order (milk is what the recipe needs – any extra jars are for home). Temperature is filled in as 5 °C – change it if the probe says different. Add the batch number and use by, then save.</p>' +
     '<div class="scroll"><table class="t"><tr><th>Item</th><th>Litres</th><th>Temp °C</th><th>Batch no</th><th>Use by</th><th>OK</th></tr>' + exp.map(function (r, i) {
-      return '<tr data-ex="' + i + '"><td><b>' + esc(r[0]) + '</b></td><td><input data-k="qty" inputmode="decimal" style="width:70px" value="' + esc(Math.round(r[1] * 100) / 100) + '"></td><td><input data-k="temp" inputmode="decimal" style="width:70px"></td><td><input data-k="batch" style="width:110px"></td><td><input data-k="use" type="date"></td><td><input type="checkbox" data-k="ok" checked style="width:22px;height:22px"></td></tr>';
+      return '<tr data-ex="' + i + '"><td><b>' + esc(r[0]) + '</b></td><td><input data-k="qty" inputmode="decimal" style="width:70px" value="' + esc(Math.round(r[1] * 100) / 100) + '"></td><td><input data-k="temp" inputmode="decimal" style="width:70px" value="5"></td><td><input data-k="batch" style="width:110px"></td><td><input data-k="use" type="date"></td><td><input type="checkbox" data-k="ok" checked style="width:22px;height:22px"></td></tr>';
     }).join('') + '</table></div><button class="btn" id="d_exsave">Save Strathroy delivery</button></div>' : '';
   render(back() + '<h1>Deliveries in</h1>' + expHtml + '<div class="card"><h2>Record a delivery</h2>' +
     '<p class="muted small">One line per item. Milk and cream: take the temperature (5 °C or below).</p><div class="grid3">' +
@@ -712,7 +752,7 @@ ROUTES.deliveries = function () {
       record('delivery', { id: uid(), date: cp.delivery, item: it, supplier: 'Strathroy', qty: num(g('qty').value), unit: 'L', useBy: g('use').value, temp: t, batch: g('batch').value.trim(), comment: g('ok').checked ? 'Received in good condition' : 'NOT OK – see Jonny', by: S.user }, it + ' saved');
     });
     toast('Strathroy delivery saved' + (warm.length ? ' – ' + warm.join(' & ') + ' above 5 °C, Jonny will be told' : '') + (rows.some(function (tr) { return tr.querySelector('[data-k=temp]').value === ''; }) ? ' (temperature missing on one line)' : ''));
-    goNext(null);
+    goNext('strathroy');
   };
   // remembers the last unit and quantity for an item
   $('#d_item').addEventListener('change', function () { var l = (D().lots || []).filter(function (x) { return String(x.item).toLowerCase() === val('d_item').toLowerCase(); }).pop(); if (l) { if (!val('d_unit') && l.unit) $('#d_unit').value = l.unit; if (!val('d_qty') && l.qty !== '' && l.qty != null) $('#d_qty').placeholder = 'last time ' + l.qty; } });
@@ -772,7 +812,7 @@ ROUTES.stock = function () {
     counted.forEach(function (r) { delete r.any; });
     var by = val('s_by') || S.user, skipped = rows.length - counted.length;
     record('iceStock', { id: val('s_date') === t && todayId ? todayId : uid(), date: val('s_date'), by: by, counts: counted }, 'Stock take saved' + (skipped ? ' – ' + skipped + ' flavour' + (skipped > 1 ? 's' : '') + ' not counted' : ''));
-    $('#app').removeAttribute('data-dirty'); goNext('stock');
+    $('#app').removeAttribute('data-dirty'); location.hash = 'home';
   };
 };
 
@@ -849,7 +889,7 @@ ROUTES.ingstock = function () {
     var notC = $$('tr[data-ing]').length - counts.filter(function (c) { return !c.supplier && c.category === undefined; }).length;
     counts.forEach(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }); if (g) { if (c.packType) g.packType = c.packType; if (c.packSize !== '') g.packSize = c.packSize; if (c.packSize !== '') g.countUnit = c.sizeUnit; } });
     record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by') || S.user, counts: counts }, 'Count saved' + (notC > 0 ? ' – ' + notC + ' item' + (notC > 1 ? 's' : '') + ' not counted' : ''));
-    goNext(null);
+    location.hash = 'home';
   };
 };
 
@@ -1047,10 +1087,16 @@ ROUTES.records = function (kind, from, to) {
     [['temps', 'Fridge & freezer temperatures'], ['cleaning', 'Cleaning'], ['pest', 'Pest control'], ['deliveries', 'Deliveries in']].concat(canPast() ? [['batches', 'Batch records']] : []).map(function (k) { return '<h2 class="pagebreak" style="margin-top:18px">' + esc(k[1]) + '</h2>' + bodyFor(k[0]); }).join('') : bodyFor(kind);
   render(back() + '<h1>Records</h1><div class="card noprint">' + kinds.map(function (k) { return '<a class="chip' + (k[0] === kind ? ' on' : '') + '" href="#records/' + k[0] + '/' + from + '/' + to + '">' + k[1] + '</a>'; }).join('') +
     '<div class="grid3" style="margin-top:10px">' + field('From', inp('rf', from, 'date')) + field('To', inp('rt', to, 'date')) + '<div><button class="btn" onclick="window.print()" style="margin-top:22px">Print</button></div></div>' +
-    '<p class="muted small">Shows the last few months kept on this device. Everything is also in the Dukes Production Google Sheet.</p></div>' +
+    '<p class="muted small">Shows the last few months kept on this device. Everything is also in the Dukes Production Google Sheet.' + (isOwner() ? ' A PDF of each month\'s records is emailed to you on the 1st.' : '') + '</p>' +
+    (isOwner() ? '<button class="btn soft sm" id="r_pdf">📄 Make PDF of ' + esc(String(from || today()).slice(0, 7)) + ' (saved to Drive)</button>' : '') + '</div>' +
     '<div class="printonly"><h2>Dukes Ultra Premium Ice Cream – ' + esc((kinds.find(function (k) { return k[0] === kind; }) || [])[1]) + ', ' + esc(nice(from)) + ' to ' + esc(nice(to)) + '</h2></div>' + body);
   var go = function () { location.hash = 'records/' + kind + '/' + val('rf') + '/' + val('rt'); };
   $('#rf').onchange = go; $('#rt').onchange = go;
+  if ($('#r_pdf')) $('#r_pdf').onclick = function () {
+    var b = this; b.disabled = true; b.textContent = 'Making the PDF…';
+    ownerCall({ op: 'fspack', month: String(from || today()).slice(0, 7) }).then(function (x) { if (x && x.url) { b.outerHTML = '<a class="btn sm" target="_blank" href="' + esc(x.url) + '">Open ' + esc(x.name) + ' ↗</a>'; } else { b.disabled = false; b.textContent = 'Try again'; toast((x && x.error) || 'Could not make the PDF'); } })
+      .catch(function () { b.disabled = false; b.textContent = 'Try again'; toast('Needs the internet'); });
+  };
 };
 
 /* ---------- office (Jonny only) ---------- */
@@ -1516,7 +1562,7 @@ ROUTES.packaging = function () {
     if (!counts.length) return toast('Nothing counted yet');
     if (counts.some(function (c) { return c.boxes !== undefined && c.boxes !== '' && !c.perBox; }) && !confirm('Some groups have no "in a box" number, so only the boxes will be saved. Save anyway?')) return;
     record('packStock', { id: uid(), date: val('g_date'), by: val('g_by'), counts: counts }, 'Packaging count saved');
-    goNext(null);
+    location.hash = 'home';
   };
 };
 
