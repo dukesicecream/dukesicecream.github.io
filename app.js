@@ -1660,7 +1660,7 @@ function drawXmas(r, mine) {
   var setup = !mine ? '' : '<div class="card"><h2>Order page</h2>' +
     '<p><a class="btn sm" target="_blank" href="' + esc(r.page) + '?preview=1">Preview the page ↗</a> <button class="btn soft sm" type="button" id="x_copy">Copy the link</button></p>' +
     '<label class="tick"><input type="checkbox" id="x_open"' + (s.open ? ' checked' : '') + '> <b>Orders open</b> – customers can order and pay</label>' +
-    '<div class="grid2">' + field('Price per big tub (£)', inp('x_price', s.price, 'number')) + field('Order by (optional)', inp('x_dl', s.deadline)) + field('Collection date (for stock planning)', inp('x_cdate', s.cdate, 'date')) + '</div>' +
+    '<div class="grid2">' + field('Price per big tub (£)', inp('x_price', s.price, 'number')) + field('Order by (optional)', inp('x_dl', s.deadline)) + field('Collection date (for stock planning)', inp('x_cdate', s.cdate, 'date')) + field('Minimum order (big tubs)', inp('x_min', s.min || 4, 'number')) + '</div>' +
     field('Collection day, time and place', '<textarea id="x_col" placeholder="e.g. Tuesday 23 December, 10am – 4pm at the Dukes shop, Gortin">' + esc(s.collection) + '</textarea>') +
     field('A short note at the top of the page (optional)', '<textarea id="x_intro">' + esc(s.intro) + '</textarea>') +
     '<h3>Flavours on the page</h3><p class="small muted">Untick to hide one. Type a new flavour in the empty box to add it.</p><div id="x_fl">' +
@@ -1691,7 +1691,7 @@ function drawXmas(r, mine) {
   $('#x_addfl').onclick = function () { $('#x_fl').insertAdjacentHTML('beforeend', '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon checked style="width:22px;height:22px"><input data-fname placeholder="Add a flavour"></div>'); };
   $('#x_save').onclick = function () {
     var fl = $$('#x_fl > div').map(function (d) { return { name: d.querySelector('[data-fname]').value.trim(), on: d.querySelector('[data-fon]').checked }; }).filter(function (f) { return f.name; });
-    var d = { open: $('#x_open').checked, price: num(val('x_price')), deadline: val('x_dl'), cdate: val('x_cdate'), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
+    var d = { open: $('#x_open').checked, price: num(val('x_price')), deadline: val('x_dl'), cdate: val('x_cdate'), min: num(val('x_min')), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
     if (val('x_key')) d.stripeKey = val('x_key');
     if (d.open && !d.collection) return toast('Add the collection day and time before opening orders');
     this.disabled = true;
