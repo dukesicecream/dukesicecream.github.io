@@ -1,5 +1,5 @@
 // Keeps the app working with no internet. Bump VERSION whenever the app files change.
-const VERSION = 'dukes-v18';
+const VERSION = 'dukes-v19';
 const FILES = ['./', 'index.html', 'app.css', 'app.js', 'logo.js', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
@@ -15,6 +15,22 @@ self.addEventListener('fetch', e => {
   const slow = new Promise(res => setTimeout(res, 4000)).then(cached).then(r => r || net);
   e.respondWith(Promise.race([net.catch(cached), slow]));
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
