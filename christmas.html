@@ -82,7 +82,7 @@
     <div id="cancelled" class="note hide">Your payment wasn't completed, so your order isn't confirmed yet. You can try again below.</div>
     <div class="card">
       <div id="intro" class="small" style="margin-bottom:12px"></div>
-      <div class="info"><span class="ic">🍦</span><div><b>Big tubs (500 ml)</b> – <span id="price"></span> each</div></div>
+      <div class="info"><span class="ic">🍦</span><div><b>Big tubs (500 ml)</b> – <span id="price"></span> each<br><span class="muted small">Minimum order <span id="min"></span> tubs – mix and match any flavours</span></div></div>
       <div class="info" style="margin-top:10px"><span class="ic">🎁</span><div><b>Collection</b><br><span id="collection" class="muted"></span></div></div>
       <div class="info hide" id="dlrow" style="margin-top:10px"><span class="ic">⏰</span><div><b>Order by</b> <span id="deadline"></span></div></div>
     </div>
@@ -136,11 +136,13 @@
     var n = 0; Object.keys(qty).forEach(function (k) { n += qty[k] || 0; });
     $('#count').textContent = n ? n + ' big tub' + (n === 1 ? '' : 's') : 'No tubs yet';
     $('#total').textContent = gbp(n * info.price);
-    $('#go').disabled = !n;
+    var m = info.min || 1;
+    $('#go').disabled = n < m;
+    if (n && n < m) $('#count').textContent = n + ' of ' + m + ' tubs – add ' + (m - n) + ' more';
     return n;
   }
   function draw() {
-    $('#price').textContent = gbp(info.price);
+    $('#price').textContent = gbp(info.price); $('#min').textContent = info.min || 1;
     $('#collection').textContent = info.collection || 'Collection day and time to be confirmed';
     if (info.deadline) { $('#deadline').textContent = info.deadline; show('#dlrow', true); }
     $('#intro').innerHTML = esc(info.intro).replace(/\n/g, '<br>');
