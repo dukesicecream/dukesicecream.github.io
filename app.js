@@ -242,7 +242,8 @@ ROUTES.home = function () {
     ['cleaning', '🧽', 'Cleaning', 'Daily · weekly · monthly'],
     ['pest', '🐭', 'Pest control', 'Monthly check'],
     ['messages', '✉️', 'Messages', 'Notes & reminders'],
-    ['records', '🖨️', 'Records', 'View & print']);
+    ['records', '🖨️', 'Records', 'View & print'],
+    ['xmas', '🎄', 'Christmas orders', 'Big tub pre-orders']);
   if (mine) tiles.push(['hours', '🔒', 'Hours & pay', 'Passcode needed']);
   else if (S.user === manager()) tiles.push(['hours', '🔒', 'Staff hours', 'Passcode needed']);
   if (boss) tiles.push(['weddings', '💍', 'Weddings', 'Tubs out & in']);
@@ -763,7 +764,7 @@ ROUTES.deliveries = function () {
     }).join('') + '</table></div><button class="btn" id="d_exsave">Save Strathroy delivery</button></div>' : '';
   render(back() + '<h1>Deliveries in</h1>' + expHtml + '<div class="card"><h2>Record a delivery</h2>' +
     '<p class="muted small">One line per item. Milk and cream: take the temperature (5 °C or below).</p>' +
-    '<p><button class="btn soft" type="button" id="d_scan">📷 Scan the label</button> <span class="muted small">fills in the batch number and use-by date</span></p><div class="grid3">' +
+    '<p><button class="btn soft" type="button" id="d_scan">📷 Scan the label</button> <button class="btn soft" type="button" id="d_inv">🧾 Scan the invoice</button><br><span class="muted small">fills in batch numbers and use-by dates</span></p><div id="d_invout"></div><div class="grid3">' +
     field('Date received', inp('d_date', keep.date, 'date')) +
     field('Item', inp('d_item', '', 'text', ' list="dl_ings" autocomplete="off"') + '<datalist id="dl_ings">' + ings.map(function (i) { return '<option value="' + esc(i.name) + '">'; }).join('') + '</datalist>') +
     field('Supplier', inp('d_sup', keep.supplier, 'text', ' list="dl_sups"') + '<datalist id="dl_sups">' + suppliers.map(function (s) { return '<option value="' + esc(s) + '">'; }).join('') + '</datalist>') +
@@ -810,6 +811,23 @@ ROUTES.deliveries = function () {
   var fillScan = function (r, b, u) { if (!r || !r.ok) return toast((r && r.error) || 'Could not read the label'); if (r.batch) b.value = r.batch; if (r.useBy) u.value = r.useBy; [b, u].forEach(function (e) { e.style.background = '#fff4c2'; });
     toast(r.batch || r.useBy ? 'Read: ' + [r.batch && 'batch ' + r.batch, r.useBy && 'use by ' + nice(r.useBy)].filter(Boolean).join(', ') + ' – check it' : 'Couldn\'t find a batch number or date – type them in'); };
   $('#d_scan').onclick = function () { scanPhoto(function (r) { fillScan(r, $('#d_batch'), $('#d_use')); }); };
+  $('#d_inv').onclick = function () {
+    scanPhoto(function (r) {
+      if (!r || !r.ok) return toast((r && r.error) || 'Could not read the invoice');
+      var found = invoiceLots(r.text), sup = (D().ingredients || []).map(function (i) { return i.supplier; }).filter(function (x) { return x && r.text.toLowerCase().indexOf(String(x).toLowerCase()) >= 0; })[0] || '';
+      if (!found.length) { $('#d_invout').innerHTML = '<div class="hint">No ingredients found on that invoice – fill in below.</div>'; return; }
+      $('#d_invout').innerHTML = '<div class="card" style="border:2px solid #1c2140"><h2>From the invoice</h2><p class="small muted">Check each line, add anything missing, then save. Yellow = read from the photo.</p><div class="scroll"><table class="t"><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Batch no</th><th>Use by</th><th></th></tr>' +
+        found.map(function (f, i) { var y = ' style="background:#fff4c2;width:110px"'; return '<tr data-iv="' + i + '"><td><b>' + esc(f.item) + '</b></td><td><input data-k="qty" inputmode="decimal" style="width:60px" value="' + esc(f.qty) + '"></td><td><input data-k="unit" style="width:60px" value="' + esc(f.unit) + '"></td><td><input data-k="batch"' + (f.batch ? y : ' style="width:110px"') + ' value="' + esc(f.batch) + '"></td><td><input data-k="use" type="date"' + (f.useBy ? ' style="background:#fff4c2"' : '') + ' value="' + esc(f.useBy) + '"></td><td><input type="checkbox" data-k="on" checked style="width:22px;height:22px"></td></tr>'; }).join('') +
+        '</table></div>' + field('Supplier', inp('d_invsup', sup)) + '<button class="btn" id="d_invsave" type="button">Save these deliveries</button></div>';
+      $('#d_invsave').onclick = function () {
+        var n = 0;
+        $$('tr[data-iv]').forEach(function (tr) { var g = function (k) { return tr.querySelector('[data-k=' + k + ']'); }; if (!g('on').checked) return; var f = found[Number(tr.dataset.iv)];
+          record('delivery', { id: uid(), date: val('d_date') || today(), item: f.item, supplier: val('d_invsup'), qty: num(g('qty').value), unit: g('unit').value.trim(), useBy: g('use').value, temp: '', batch: g('batch').value.trim(), comment: 'From invoice photo', by: val('d_by') || S.user }); n++; });
+        toast(n + ' deliver' + (n === 1 ? 'y' : 'ies') + ' saved'); route();
+      };
+      $('#d_invout').scrollIntoView({ behavior: 'smooth' });
+    });
+  };
   $$('[data-scan]').forEach(function (bt) { bt.onclick = function () { var tr = bt.closest('tr'); scanPhoto(function (r) { fillScan(r, tr.querySelector('[data-k=batch]'), tr.querySelector('[data-k=use]')); }); }; });
   // remembers the last unit and quantity for an item
   $('#d_item').addEventListener('change', function () { var l = (D().lots || []).filter(function (x) { return String(x.item).toLowerCase() === val('d_item').toLowerCase(); }).pop(); if (l) { if (!val('d_unit') && l.unit) $('#d_unit').value = l.unit; if (!val('d_qty') && l.qty !== '' && l.qty != null) $('#d_qty').placeholder = 'last time ' + l.qty; } });
@@ -887,6 +905,7 @@ ROUTES.ingstock = function () {
   var mixOf = {}; if (isOwner()) ((S.own && S.own.insights && S.own.insights.ingredients) || []).forEach(function (g) { if (g.mixL && g.mixL.length) mixOf[g.name] = g.mixL; });
   var cell = function (k, v, w, ph, extra) { return '<input data-k="' + k + '" value="' + esc(v == null ? '' : v) + '" style="width:' + w + 'px" placeholder="' + ph + '"' + (extra || '') + '>'; };
   var line = function (i) {
+    if (/brownie/i.test(i.name || '')) return '<td style="white-space:nowrap">' + cell('slabs', '', 60, 'slabs', ' inputmode="decimal"') + ' slabs <span class="muted">+</span> ' + cell('bkts', '', 60, 'buckets', ' inputmode="decimal"') + ' buckets <b data-t="tot" class="small"></b></td>';
     return '<td style="white-space:nowrap">' + cell('qty', '', 60, 'No.', ' inputmode="decimal"') + ' <span class="muted">×</span> ' +
       cell('psize', i.packSize === '' || i.packSize == null ? '' : i.packSize, 64, 'size', ' inputmode="decimal"') + ' ' +
       '<select data-k="sunit" style="width:76px">' + ['kg', 'g', 'L', 'ml', 'each'].map(function (u) { return '<option' + (u.toLowerCase() === String(sizeU(i)).toLowerCase() ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select>' +
@@ -912,6 +931,11 @@ ROUTES.ingstock = function () {
   $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>');
   function read(tr) {
     var g = function (k) { return tr.querySelector('[data-k=' + k + ']').value.trim(); };
+    if (tr.querySelector('[data-k=slabs]')) { // 2 slabs chop into one bucket
+      var sl = num(g('slabs')), bk = num(g('bkts'));
+      if (sl === '' && bk === '') return { packs: '', packType: '', packSize: '', sizeUnit: 'buckets', qty: '' };
+      return { packs: '', packType: '', packSize: '', sizeUnit: 'buckets', qty: Math.round(((Number(sl) || 0) / 2 + (Number(bk) || 0)) * 100) / 100, unit: 'buckets', note: (sl || 0) + ' slabs + ' + (bk || 0) + ' buckets' };
+    }
     var n = num(g('qty')), size = num(g('psize')), su = g('sunit');
     if (su === 'each') size = '';
     var c = { packs: n, packType: '', packSize: size, sizeUnit: su };
@@ -922,7 +946,7 @@ ROUTES.ingstock = function () {
   // show the total and highlight anything at or below its reorder level as it's counted
   function check(tr) {
     var c = read(tr), t = tr.querySelector('[data-t=tot]');
-    if (t) t.textContent = c.qty !== '' && c.packSize !== '' && c.packSize > 0 ? '= ' + c.qty + ' ' + c.unit : '';
+    if (t) t.textContent = c.qty !== '' && (c.packSize !== '' && c.packSize > 0 || c.note) ? '= ' + c.qty + ' ' + c.unit : '';
     var re = tr.dataset.re, b = tr.querySelector('[data-reorder]');
     var low = re !== undefined && re !== '' && c.packs !== '' && c.packs <= Number(re);
     tr.style.background = low ? '#fdecea' : '';
@@ -1571,6 +1595,102 @@ function invoiceMatches(text) {
     }
   });
   return out;
+}
+// Invoice photo for deliveries: finds each ingredient and the batch / lot number and best-before printed near it (no prices shown)
+function invoiceLots(text) {
+  var lines = String(text || '').split(/\n+/).map(function (l) { return l.trim(); }).filter(Boolean), out = [];
+  var words = function (n) { return String(n).toLowerCase().replace(/\(.*?\)/g, '').split(/[^a-z]+/).filter(function (w) { return w.length >= 4 && !/^(paste|cream|powder|whole|with|homemade)$/.test(w); }); };
+  var M = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  var dateIn = function (t) {
+    var m = t.match(/\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/) , y;
+    if (m) { y = Number(m[3]); if (y < 100) y += 2000; return y + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2); }
+    m = t.match(/\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s*(\d{2,4})\b/i);
+    if (m) { y = Number(m[3]); if (y < 100) y += 2000; return y + '-' + ('0' + M[m[2].toLowerCase()]).slice(-2) + '-' + ('0' + m[1]).slice(-2); }
+    return '';
+  };
+  (D().ingredients || []).filter(function (i) { return !/packag|clean/i.test(i.category || ''); }).forEach(function (ing) {
+    var w = words(ing.name); if (!w.length) return;
+    for (var i = 0; i < lines.length; i++) {
+      if (!w.every(function (x) { return lines[i].toLowerCase().indexOf(x) >= 0; })) continue;
+      var near = lines.slice(i, i + 3).join(' ');
+      var b = near.match(/(?:lot|batch|l\/n|b\/n|bn|lot\s*no|batch\s*no|lot\s*code)\s*[:.#\-]?\s*([A-Z0-9][A-Z0-9\-\/]{2,18})/i);
+      var bbAt = near.search(/(best\s*before|bb[e]?\b|use\s*by|exp)/i), ub = dateIn(bbAt >= 0 ? near.slice(bbAt) : '');
+      var q = lines[i].match(/^\s*(\d{1,3})\s*(?:x|×)?\s/i);
+      out.push({ item: ing.name, batch: b ? b[1].replace(/[\-\/]+$/, '') : '', useBy: ub, qty: q ? q[1] : '', unit: '' });
+      break;
+    }
+  });
+  return out;
+}
+/* ---------- Christmas pre-orders (staff see orders, Jonny also sees money and settings) ---------- */
+ROUTES.xmas = function () {
+  var mine = isOwner();
+  if (!navigator.onLine) return render(back() + '<h1>🎄 Christmas orders</h1><div class="card">This page needs the internet.</div>');
+  render(back() + '<h1>🎄 Christmas orders</h1><p class="muted center">Loading…</p>');
+  var load = mine ? ownerCall({ op: 'xmas' }) : fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'xmas', k: S.key }) }).then(function (r) { return r.json(); });
+  load.then(function (r) { if (location.hash !== '#xmas') return; if (!r.ok) return toast(r.error || 'Could not open'); drawXmas(r, mine); }).catch(function () { toast('No connection'); });
+};
+function drawXmas(r, mine) {
+  var o = r.orders || [], live = o.filter(function (x) { return x.paid || !mine; });
+  var paid = o.filter(function (x) { return x.paid; }), byF = {}, tubs = 0;
+  paid.forEach(function (x) { tubs += x.tubs; x.items.split('\n').forEach(function (l) { var m = l.match(/^(\d+)\s*×\s*(.+)$/); if (m) byF[m[2]] = (byF[m[2]] || 0) + Number(m[1]); }); });
+  var money = mine ? paid.reduce(function (t, x) { return t + Number(x.total || 0); }, 0) : 0;
+  var row = function (x) {
+    return '<tr><td><b>' + esc(x.no) + '</b><br><span class="small muted">' + esc(short(x.date)) + '</span></td><td><b>' + esc(x.name) + '</b><br><a href="tel:' + esc(x.phone.replace(/[^\d+]/g, '')) + '">' + esc(x.phone) + '</a>' + (mine ? '<br><span class="small">' + esc(x.email) + '</span>' : '') + (x.notes ? '<br><i class="small">' + esc(x.notes) + '</i>' : '') + '</td>' +
+      '<td class="small">' + esc(x.items).replace(/\n/g, '<br>') + '</td><td>' + (x.paid ? '<span class="pill ok">Paid</span>' : '<span class="pill warn">' + esc(x.status) + '</span>') + (mine && x.total !== undefined ? '<br><span class="small">' + gbp(x.total) + '</span>' : '') + '</td>' +
+      '<td><label class="tick" style="margin:0"><input type="checkbox" data-col="' + esc(x.id) + '"' + (x.collected ? ' checked' : '') + '> Collected</label></td></tr>';
+  };
+  var s = r.settings || {};
+  var setup = !mine ? '' : '<div class="card"><h2>Order page</h2>' +
+    '<p><a class="btn sm" target="_blank" href="' + esc(r.page) + '?preview=1">Preview the page ↗</a> <button class="btn soft sm" type="button" id="x_copy">Copy the link</button></p>' +
+    '<label class="tick"><input type="checkbox" id="x_open"' + (s.open ? ' checked' : '') + '> <b>Orders open</b> – customers can order and pay</label>' +
+    '<div class="grid2">' + field('Price per big tub (£)', inp('x_price', s.price, 'number')) + field('Order by (optional)', inp('x_dl', s.deadline)) + '</div>' +
+    field('Collection day, time and place', '<textarea id="x_col" placeholder="e.g. Tuesday 23 December, 10am – 4pm at the Dukes shop, Gortin">' + esc(s.collection) + '</textarea>') +
+    field('A short note at the top of the page (optional)', '<textarea id="x_intro">' + esc(s.intro) + '</textarea>') +
+    '<h3>Flavours on the page</h3><p class="small muted">Untick to hide one. Type a new flavour in the empty box to add it.</p><div id="x_fl">' +
+    (r.flavours || []).concat([{ name: '', on: true }]).map(function (f) { return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon' + (f.on ? ' checked' : '') + ' style="width:22px;height:22px"><input data-fname value="' + esc(f.name) + '" placeholder="Add a flavour"></div>'; }).join('') +
+    '</div><button class="btn soft sm" type="button" id="x_addfl">+ Another flavour</button>' +
+    '<h3>Card payments</h3>' + (r.card ? '<p><span class="pill ok">Stripe connected</span> Payments are checked automatically and customers get a confirmation email.</p>' :
+      '<p class="small">Not connected yet. Make a free Stripe account, then in Stripe go to <b>Developers → API keys</b>, copy the <b>Secret key</b> (starts sk_live_) and paste it here yourself. Until then, orders are taken without payment.</p>') +
+    field(r.card ? 'Replace the Stripe key' : 'Stripe secret key', '<input id="x_key" type="password" autocomplete="off" placeholder="sk_live_…">') +
+    '<div class="bar"><button class="btn" id="x_save">Save</button></div></div>' +
+    '<div class="card"><h2>Message all customers</h2><div class="grid2">' + field('Send to', '<select id="x_who"><option value="paid">Everyone who has paid</option><option value="notcollected">Paid but not collected yet</option><option value="all">Everyone who started an order</option></select>') + field('Subject', inp('x_sub', 'Your Dukes Christmas order')) + '</div>' +
+    field('Message', '<textarea id="x_body" style="min-height:120px">Hi {name},\n\n</textarea>') + '<p class="small muted">{name} becomes their first name and {order} their order number. Replies come to you. Google allows about ' + esc(r.quota) + ' more emails today.</p>' +
+    '<button class="btn" id="x_send" type="button">Send email</button> <button class="btn soft" id="x_phones" type="button">Copy phone numbers (for texts)</button></div>';
+  render(back() + '<h1>🎄 Christmas orders</h1>' +
+    '<div class="card"><div class="tiles" style="grid-template-columns:repeat(' + (mine ? 3 : 2) + ',1fr)"><div class="tile"><b style="font-size:24px">' + paid.length + '</b><span>paid orders</span></div><div class="tile"><b style="font-size:24px">' + tubs + '</b><span>big tubs</span></div>' + (mine ? '<div class="tile"><b style="font-size:24px">' + gbp(money) + '</b><span>taken</span></div>' : '') + '</div>' +
+    (r.collection || s.collection ? '<p class="small"><b>Collection:</b> ' + esc(r.collection || s.collection) + '</p>' : '') +
+    (Object.keys(byF).length ? '<h3>Tubs to make</h3><table class="t">' + Object.keys(byF).sort(function (a, b) { return byF[b] - byF[a]; }).map(function (f) { return '<tr><td>' + esc(f) + '</td><td><b>' + byF[f] + '</b></td></tr>'; }).join('') + '</table>' : '') + '</div>' +
+    '<div class="card"><h2>Orders</h2>' + inp('x_find', '', 'search', ' placeholder="Search name or order no"') + '<div class="scroll"><table class="t" id="x_tab"><tr><th>Order</th><th>Customer</th><th>Tubs</th><th>Payment</th><th></th></tr>' + (o.map(row).join('') || '<tr><td colspan="5" class="muted">No orders yet.</td></tr>') + '</table></div>' +
+    (mine ? '<button class="btn soft sm" id="x_ref" type="button">Check payments now</button>' : '') + '</div>' + setup);
+  $('#x_find').oninput = function () { var q = this.value.toLowerCase(); $$('#x_tab tr').forEach(function (tr, i) { if (i) tr.style.display = tr.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none'; }); };
+  $$('[data-col]').forEach(function (c) { c.onchange = function () {
+    var d = { id: c.dataset.col, collected: c.checked };
+    (mine ? ownerCall({ op: 'xmasCollect', id: d.id, collected: d.collected }) : fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'xmas', k: S.key, op: 'collect', id: d.id, collected: d.collected }) }).then(function (x) { return x.json(); }))
+      .then(function (x) { toast(x.ok ? (d.collected ? 'Marked as collected' : 'Unmarked') : (x.error || 'Not saved')); }).catch(function () { toast('No connection – not saved'); c.checked = !c.checked; });
+  }; });
+  if (!mine) return;
+  $('#x_ref').onclick = function () { this.disabled = true; ownerCall({ op: 'xmasRefresh' }).then(function (x) { if (x.ok) drawXmas(x, true); }); };
+  $('#x_copy').onclick = function () { navigator.clipboard && navigator.clipboard.writeText(r.page).then(function () { toast('Link copied'); }); };
+  $('#x_addfl').onclick = function () { $('#x_fl').insertAdjacentHTML('beforeend', '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon checked style="width:22px;height:22px"><input data-fname placeholder="Add a flavour"></div>'); };
+  $('#x_save').onclick = function () {
+    var fl = $$('#x_fl > div').map(function (d) { return { name: d.querySelector('[data-fname]').value.trim(), on: d.querySelector('[data-fon]').checked }; }).filter(function (f) { return f.name; });
+    var d = { open: $('#x_open').checked, price: num(val('x_price')), deadline: val('x_dl'), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
+    if (val('x_key')) d.stripeKey = val('x_key');
+    if (d.open && !d.collection) return toast('Add the collection day and time before opening orders');
+    this.disabled = true;
+    ownerCall({ op: 'xmasSave', d: d }).then(function (x) { if (!x.ok) { toast(x.error || 'Not saved'); $('#x_save').disabled = false; return; } toast('Saved'); drawXmas(x, true); }).catch(function () { toast('No connection'); $('#x_save').disabled = false; });
+  };
+  $('#x_send').onclick = function () {
+    var who = $('#x_who').selectedOptions[0].textContent;
+    if (!confirm('Send this email to ' + who.toLowerCase() + '?')) return;
+    this.disabled = true;
+    ownerCall({ op: 'xmasEmail', d: { who: val('x_who'), subject: val('x_sub'), body: $('#x_body').value } }).then(function (x) { toast(x.ok ? 'Sent to ' + x.sent + ' customer' + (x.sent === 1 ? '' : 's') : (x.error || 'Not sent')); $('#x_send').disabled = false; }).catch(function () { toast('No connection'); $('#x_send').disabled = false; });
+  };
+  $('#x_phones').onclick = function () {
+    var w = val('x_who'), list = o.filter(function (x) { return w === 'all' || (x.paid && (w !== 'notcollected' || !x.collected)); }).map(function (x) { return x.phone; }).filter(Boolean);
+    navigator.clipboard && navigator.clipboard.writeText(Array.from(new Set(list)).join(', ')).then(function () { toast(list.length + ' numbers copied'); });
+  };
 }
 ROUTES.finance = function () { ownLoad('Costs & prices', 'finance', drawFinance); };
 function drawFinance(r) {
