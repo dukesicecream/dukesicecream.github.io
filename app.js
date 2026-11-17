@@ -791,7 +791,11 @@ ROUTES.deliveries = function () {
     '<div class="card"><h2>In stock now (open lots)</h2><p class="muted small">Tap <b>Used up</b> when a lot is finished, so it isn\'t suggested on the next batch.</p><div class="scroll"><table class="t"><tr><th>Received</th><th>Item</th><th>Qty</th><th>Batch</th><th>Use by</th><th></th></tr>' +
     (open.map(function (l) {
       return '<tr><td>' + esc(short(l.date)) + '</td><td>' + esc(l.item) + '<br><span class="muted small">' + esc(l.supplier || '') + '</span></td><td>' + esc(l.qty) + ' ' + esc(l.unit || '') + '</td><td>' + esc(l.batch) + '</td><td>' + esc(l.useBy ? short(l.useBy) : '') + '</td><td><button class="btn soft sm" data-fin="' + esc(l.id) + '">Used up</button></td></tr>';
-    }).join('') || '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>') + '</table></div></div>');
+    }).join('') || '<tr><td colspan="6" class="muted">Nothing recorded yet.</td></tr>') + '</table></div></div>' +
+    '<div class="card"><h2>Recent deliveries</h2><p class="muted small">Everything recorded lately, including lots that are used up. Older deliveries are on the Records page.</p><div class="scroll"><table class="t"><tr><th>Received</th><th>Item</th><th>Qty</th><th>Batch</th><th>Use by</th></tr>' +
+    ((D().lots || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 30).map(function (l) {
+      return '<tr' + (l.status === 'Finished' ? ' class="muted"' : '') + '><td>' + esc(short(l.date)) + '</td><td>' + esc(l.item) + '<br><span class="small muted">' + esc(l.supplier || '') + (l.status === 'Finished' ? ' · used up' : '') + '</span></td><td>' + esc(l.qty) + ' ' + esc(l.unit || '') + '</td><td>' + esc(l.batch || '') + '</td><td>' + esc(l.useBy ? short(l.useBy) : '') + '</td></tr>';
+    }).join('') || '<tr><td colspan="5" class="muted">No deliveries recorded yet.</td></tr>') + '</table></div></div>');
   // picking an item fills in the supplier and unit from its last delivery, and 5 °C for chilled items (all can be changed)
   $('#d_item').addEventListener('input', function () { var on = !!val('d_item'); $('#d_cat').style.display = on ? '' : 'none'; if (on) $('#d_pick').value = ''; });
   $('#d_pick').onchange = function () {
@@ -945,7 +949,19 @@ ROUTES.ingstock = function () {
       '<select data-k="sunit" style="width:76px">' + ['kg', 'g', 'L', 'ml', 'each'].map(function (u) { return '<option' + (u.toLowerCase() === String(sizeU(i)).toLowerCase() ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select>' +
       ' <b data-t="tot" class="small"></b></td>';
   };
-  render(back() + '<h1>Stock – ingredients & cleaning products</h1><p class="muted">Put how many and the size of each, e.g. <b>8</b> × <b>25</b> kg sugar, <b>2</b> × <b>3</b> kg bubblegum. For things like bleach just put how many and choose <b>each</b>. Sizes are remembered for next time. Leave a line empty if you didn\'t count it. Packaging is counted on the Packaging stock tab.</p>' +
+  // once everything has been counted, this page shows what's in stock now (last count + deliveries – what batches used)
+  var now = {}; (D().ingNow || []).forEach(function (g) { now[g.name] = g; });
+  var hasCounts = (D().ingNow || []).some(function (g) { return g.est != null; }), showFull = !hasCounts || S.fullCount;
+  var amt = function (q, u) { if (q == null) return '<span class="muted">not counted yet</span>'; var lu = String(u || '').toLowerCase(); return lu === 'g' && q >= 1000 ? r2(q / 1000, 2) + ' kg' : lu === 'kg' && q < 1 ? Math.round(q * 1000) + ' g' : (Math.round(q * 100) / 100).toLocaleString('en-GB') + ' ' + esc(u || ''); };
+  var curHtml = !hasCounts ? '' : '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">In stock now</h2><button class="btn soft sm" type="button" id="i_full">' + (showFull ? 'Hide the full count' : 'Do a full count') + '</button></div>' +
+    '<p class="muted small">Worked out from the last count, plus deliveries, less what the batches used. If something\'s wrong, tap <b>Edit</b> and put in what\'s really there.</p>' +
+    delGroups((D().ingredients || []).filter(function (i) { return i.track !== false && !/packag/i.test(i.category || ''); })).map(function (g) {
+      return '<h3>' + esc(g[0]) + '</h3><table class="t">' + g[1].map(function (n) {
+        var x = now[n] || {};
+        return '<tr data-cur="' + esc(n) + '"><td>' + esc(n) + '</td><td data-amt><b>' + amt(x.est, x.unit) + '</b>' + (x.counted ? '<br><span class="small muted">counted ' + esc(short(x.counted)) + (x.weeksLeft != null ? ' · about ' + x.weeksLeft + ' weeks left' : '') + '</span>' : '') + '</td><td style="width:70px"><button class="btn soft sm" type="button" data-edit="' + esc(n) + '">Edit</button></td></tr>';
+      }).join('') + '</table>';
+    }).join('') + '</div>';
+  render(back() + '<h1>Stock – ingredients & cleaning products</h1>' + curHtml + '<div id="i_fullbox"' + (showFull ? '' : ' style="display:none"') + '><p class="muted">Put how many and the size of each, e.g. <b>8</b> × <b>25</b> kg sugar, <b>2</b> × <b>3</b> kg bubblegum. For things like bleach just put how many and choose <b>each</b>. Sizes are remembered for next time. Leave a line empty if you didn\'t count it. Packaging is counted on the Packaging stock tab.</p>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('i_date', today(), 'date')) + field('Counted by', staffSel('i_by')) + '</div></div>' +
     catNames.map(function (c) {
       return '<div class="card scroll"><h2>' + esc(c) + '</h2><table class="t">' + cats[c].map(function (i) {
@@ -958,8 +974,21 @@ ROUTES.ingstock = function () {
       }).join('') + '</table></div>';
     }).join('') +
     '<div class="card scroll"><h2>Something not on the list?</h2><table class="t" id="i_new"></table><button class="btn soft sm" id="i_addrow" type="button">+ Add another</button></div>' +
-    '<div class="bar"><button class="btn" id="i_save">Save count</button></div>' +
+    '<div class="bar"><button class="btn" id="i_save">Save count</button></div></div>' +
     '');
+  if ($('#i_full')) $('#i_full').onclick = function () { S.fullCount = !S.fullCount; var on = $('#i_fullbox').style.display === 'none'; $('#i_fullbox').style.display = on ? '' : 'none'; this.textContent = on ? 'Hide the full count' : 'Do a full count'; };
+  $$('[data-edit]').forEach(function (b) { b.onclick = function () {
+    var n = b.dataset.edit, x = now[n] || {}, ing = (D().ingredients || []).find(function (i) { return i.name === n; }) || {}, u = x.unit || ing.unit || '';
+    var td = b.closest('tr').querySelector('[data-amt]');
+    td.innerHTML = '<span style="display:flex;gap:6px;align-items:center"><input type="number" inputmode="decimal" style="width:100px" value="' + (x.est == null ? '' : Math.round(x.est * 100) / 100) + '"> ' + esc(u) + ' <button class="btn sm" type="button">Save</button></span>';
+    var inpt = td.querySelector('input'); inpt.focus(); inpt.select();
+    td.querySelector('button').onclick = function () {
+      var q = num(inpt.value); if (q === '') return toast('Put in how much is there');
+      record('ingStock', { id: uid(), date: today(), by: S.user, counts: [{ ingredient: n, qty: q, unit: u }] }, n + ' updated to ' + q + ' ' + u);
+      now[n] = Object.assign({}, x, { est: q, counted: today(), unit: u });
+      td.innerHTML = '<b>' + amt(q, u) + '</b><br><span class="small muted">counted ' + esc(short(today())) + '</span>';
+    };
+  }; });
   var catOpts = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Cleaning products', 'Other'])));
   function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Name, e.g. Sugar" data-k="name"></td>' + line({}) + '<td><select data-k="cat">' + catOpts.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); wire(tr); }
   $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>');
