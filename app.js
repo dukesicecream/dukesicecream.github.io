@@ -915,29 +915,40 @@ ROUTES.stock = function () {
   var todays = {}; (D().iceStock || []).forEach(function (x) { if (x.date === t) todays[x.flavour] = x; });
   var todayId = ((D().iceStock || []).filter(function (x) { return x.date === t && x.id; }).map(function (x) { return String(x.id).split(':')[0]; }).pop()) || '';
   var wk = function (w) { return w == null ? '–' : w <= 3 ? '<b style="color:#b3261e">' + w + '</b>' : w; };
+  var cv = function (f, k) { var c = todays[f] || {}; return c[k] == null ? '' : c[k]; };
+  // small tubs: trays only (half a tray = 0.5). Any loose tubs from an earlier count today are folded into the trays.
+  var trayVal = function (f) { var tr = cv(f, 'trays'), lo = Number(cv(f, 'loose')) || 0; return tr === '' && !lo ? '' : r2((Number(tr) || 0) + lo / per, 2); };
+  var inpF = function (f, k, v, mode) { return '<input data-ff="' + esc(f) + '" data-k="' + k + '" inputmode="' + (mode || 'numeric') + '" style="width:80px" value="' + esc(v) + '">'; };
+  var flv = D().flavours || [];
   render(back() + '<h1>Ice cream stock take</h1>' +
-    '<p class="muted">Big tubs: how many stacks × how many tubs high (plus any odd ones). Small tubs: full trays of ' + per + ' plus any loose. Napolis: just count them. Anything not counted is highlighted – you can still save.</p>' +
+    '<p class="muted">Small tubs: count the full trays of ' + per + ' (half a tray is 0.5, e.g. 4.5). Big tubs: how many stacks × how many tubs high. Napolis: just count them. Anything not counted is highlighted – you can still save.</p>' +
     (todayId ? '<div class="hint">Today\'s count is filled in below – change anything and save again.</div>' : '') +
     '<div id="s_miss"></div>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('s_date', t, 'date', mine ? '' : ' readonly')) + field('Counted by', staffSel('s_by', todayId ? ((D().iceStock || []).find(function (x) { return x.date === t; }) || {}).by : null)) + '</div></div>' +
-    '<div class="card scroll"><table class="t"><tr><th>Flavour</th><th>Big: stacks</th><th>× high</th><th>+ odd</th><th>Big total</th><th>Small: trays</th><th>+ loose</th><th>Small total</th><th>Napolis</th>' + (mine ? '<th class="noprint">Last count</th><th class="noprint">Weeks left<br><span class="small">small / big</span></th>' : '') + '</tr>' +
-    (D().flavours || []).map(function (f) {
-      var l = last[f], c = todays[f] || {}, v = function (k) { return esc(c[k] == null ? '' : c[k]); }, x = fc[f];
-      return '<tr data-f="' + esc(f) + '"><td><b>' + esc(f) + '</b></td>' +
-        '<td><input data-k="stacks" inputmode="numeric" style="width:64px" value="' + v('stacks') + '"></td><td><input data-k="height" inputmode="numeric" style="width:64px" value="' + v('height') + '"></td><td><input data-k="lextra" inputmode="numeric" style="width:64px" value="' + v('lextra') + '"></td><td class="stat" data-t="large" style="font-size:20px">–</td>' +
-        '<td><input data-k="trays" inputmode="numeric" style="width:64px" value="' + v('trays') + '"></td><td><input data-k="loose" inputmode="numeric" style="width:64px" value="' + v('loose') + '"></td><td class="stat" data-t="small" style="font-size:20px">–</td>' +
-        '<td><input data-k="napolis" inputmode="numeric" style="width:64px" value="' + v('napolis') + '"></td>' +
-        (mine ? '<td class="muted small noprint">' + (l ? esc(short(l.date)) + ': ' + (l.small || 0) + ' S / ' + (l.large || 0) + ' B' + (l.napolis ? ' / ' + l.napolis + ' N' : '') : '–') + '</td><td class="small noprint">' + (x ? wk(x.weeksLeftS) + ' / ' + wk(x.weeksLeftL) : '–') + '</td>' : '') + '</tr>';
-    }).join('') + '</table></div>' +
+    '<div class="card"><h2>Small tubs</h2><table class="t"><tr><th>Flavour</th><th>Trays</th><th>Small tubs</th>' + (mine ? '<th class="noprint">Last count</th><th class="noprint">Weeks left</th>' : '') + '</tr>' +
+    flv.map(function (f) { var l = last[f], x = fc[f];
+      return '<tr data-f="' + esc(f) + '"><td><b>' + esc(f) + '</b></td><td>' + inpF(f, 'trays', trayVal(f), 'decimal') + '</td><td class="stat" data-t="small" style="font-size:20px">–</td>' +
+        (mine ? '<td class="muted small noprint">' + (l ? esc(short(l.date)) + ': ' + (l.small || 0) : '–') + '</td><td class="small noprint">' + (x ? wk(x.weeksLeftS) : '–') + '</td>' : '') + '</tr>'; }).join('') + '</table></div>' +
+    '<div class="card"><h2>Big tubs</h2><table class="t"><tr><th>Flavour</th><th>Stacks</th><th>× high</th><th>Big tubs</th>' + (mine ? '<th class="noprint">Last count</th><th class="noprint">Weeks left</th>' : '') + '</tr>' +
+    flv.map(function (f) { var l = last[f], x = fc[f];
+      return '<tr data-f2="' + esc(f) + '"><td><b>' + esc(f) + '</b></td><td>' + inpF(f, 'stacks', cv(f, 'stacks')) + '</td><td>' + inpF(f, 'height', cv(f, 'height')) + '</td><td class="stat" data-t="large" style="font-size:20px">–</td>' +
+        (mine ? '<td class="muted small noprint">' + (l ? esc(short(l.date)) + ': ' + (l.large || 0) : '–') + '</td><td class="small noprint">' + (x ? wk(x.weeksLeftL) : '–') + '</td>' : '') + '</tr>'; }).join('') + '</table></div>' +
+    '<div class="card"><h2>Napolis</h2><table class="t"><tr><th>Flavour</th><th>Napolis</th>' + (mine ? '<th class="noprint">Last count</th>' : '') + '</tr>' +
+    flv.map(function (f) { var l = last[f];
+      return '<tr data-f3="' + esc(f) + '"><td><b>' + esc(f) + '</b></td><td>' + inpF(f, 'napolis', cv(f, 'napolis')) + '</td>' + (mine ? '<td class="muted small noprint">' + (l && l.napolis ? esc(short(l.date)) + ': ' + l.napolis : '–') + '</td>' : '') + '</tr>'; }).join('') + '</table></div>' +
     '<div class="bar"><button class="btn" id="s_save">Save stock take</button></div>');
   var AMBER = '#fff4d6';
   function calc(tr) {
-    var g = function (k) { return Number(tr.querySelector('[data-k=' + k + ']').value) || 0; };
-    var tubIn = ['stacks', 'height', 'lextra', 'trays', 'loose'].some(function (k) { return tr.querySelector('[data-k=' + k + ']').value !== ''; });
-    var L = g('stacks') * g('height') + g('lextra'), Sm = g('trays') * per + g('loose');
-    tr.querySelector('[data-t=large]').textContent = tubIn ? L : '–'; tr.querySelector('[data-t=small]').textContent = tubIn ? Sm : '–';
-    tr.style.background = tubIn ? '' : AMBER;
-    return { any: tubIn, flavour: tr.dataset.f, stacks: num(tr.querySelector('[data-k=stacks]').value), height: num(tr.querySelector('[data-k=height]').value), lextra: num(tr.querySelector('[data-k=lextra]').value), large: L, trays: num(tr.querySelector('[data-k=trays]').value), loose: num(tr.querySelector('[data-k=loose]').value), small: Sm, napolis: num(tr.querySelector('[data-k=napolis]').value) };
+    var f = tr.dataset.f, el = function (k) { return $$('[data-k=' + k + ']').find(function (e) { return e.dataset.ff === f; }); };
+    var g = function (k) { return Number(el(k).value) || 0; };
+    var tubIn = ['stacks', 'height', 'trays'].some(function (k) { return el(k).value !== ''; });
+    var odd = Number(cv(f, 'lextra')) || 0; // odd big tubs from an older count today are kept
+    var L = g('stacks') * g('height') + odd, Sm = Math.round(g('trays') * per);
+    var big = $$('tr[data-f2]').find(function (r) { return r.dataset.f2 === f; });
+    tr.querySelector('[data-t=small]').textContent = el('trays').value !== '' ? Sm : '–';
+    big.querySelector('[data-t=large]').textContent = el('stacks').value !== '' || el('height').value !== '' ? L : '–';
+    tr.style.background = tubIn ? '' : AMBER; big.style.background = tubIn ? '' : AMBER;
+    return { any: tubIn, flavour: f, stacks: num(el('stacks').value), height: num(el('height').value), lextra: odd || '', large: L, trays: num(el('trays').value), loose: '', small: Sm, napolis: num(el('napolis').value) };
   }
   function missing() {
     var rows = $$('tr[data-f]').map(calc), notC = rows.filter(function (r) { return !r.any; }).map(function (r) { return r.flavour; });
@@ -1900,7 +1911,8 @@ function drawFinance(r) {
 /* ---------- packaging stock ---------- */
 ROUTES.packaging = function () {
   var items = D().packItems || [], last = D().packStock || {}, mine = isOwner();
-  var est = mine ? ((S.own && S.own.pack) || D().pack || {}) : {};
+  var est = (mine && S.own && S.own.pack) || D().pack || {};
+  var hasCounts = Object.keys(last).length > 0, showFull = !hasCounts || !!S.pFull;
   if (mine && !S.own && navigator.onLine) loadOwn().then(function (o) { if (o && (location.hash || '') === '#packaging' && !$('#app').hasAttribute('data-dirty')) route(); });
   var groups = {}; items.forEach(function (i) { (groups[i.group] = groups[i.group] || []).push(i); });
   var order = ['Small tub lids', 'Small tubs', 'Big tubs', 'Big tub lids', 'Big tub lid labels'];
@@ -1908,7 +1920,22 @@ ROUTES.packaging = function () {
   var isRoll = function (g) { return groups[g].some(function (i) { return i.perRoll; }) || /label/i.test(g); };
   var word = function (g) { var u = (groups[g][0] || {}).unit || 'units'; return /lid/i.test(g) ? 'lids' : /tub/i.test(g) ? 'tubs' : u; };
   var short_ = function (s) { return s.replace(/^(Small tub lid|Big tub lid label|Big tub) – /, ''); };
-  render(back() + '<h1>Packaging stock</h1><p class="muted">Count the <b>boxes</b> of each. Check the number in a box beside each heading – change it if a box holds a different amount. Labels: count the rolls (a part roll can be a half, e.g. 2.5). Leave a box empty if you didn\'t count it. Anything not on the list – add it at the bottom.</p>' +
+  // after the first count: what's left now (last count less what's been tubbed since), with an Edit button
+  var leftTxt = function (i, g) {
+    var e = est[i.item], l = last[i.item], w = isRoll(g) ? 'labels' : word(g);
+    if (!e && !l) return '<span class="muted">not counted yet</span>';
+    var q = e ? e.est : Number(l.qty) || 0, pb = i.perBox || (groups[g].find(function (x) { return x.perBox; }) || {}).perBox;
+    return '<b>' + Number(q).toLocaleString('en-GB') + ' ' + esc(w) + '</b>' + (!isRoll(g) && pb ? ' <span class="small muted">(≈ ' + r2(q / pb, 1) + ' boxes)</span>' : '') +
+      '<br><span class="small muted">counted ' + esc(short((e && e.counted) || l.date)) + (e && e.used ? ' · ' + e.used + ' used since' : '') + '</span>';
+  };
+  var curHtml = !hasCounts ? '' : '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">In stock now</h2><button class="btn soft sm" type="button" id="g_full">' + (showFull ? 'Hide the full count' : 'Do a full count') + '</button></div>' +
+    '<p class="muted small">Worked out from the last count, less the tubs, lids and labels used on the batches tubbed since. If something\'s wrong, tap <b>Edit</b> and put in what\'s really there.</p>' +
+    names.map(function (g) {
+      return '<h3>' + esc(g) + '</h3><table class="t">' + groups[g].map(function (i) {
+        return '<tr data-pc="' + esc(i.item) + '"><td>' + esc(short_(i.item)) + '</td><td data-left>' + leftTxt(i, g) + '</td><td style="width:70px"><button class="btn soft sm" type="button" data-pedit="' + esc(i.item) + '">Edit</button></td></tr>';
+      }).join('') + '</table>';
+    }).join('') + '</div>';
+  render(back() + '<h1>Packaging stock</h1>' + curHtml + '<div id="g_fullbox"' + (showFull ? '' : ' style="display:none"') + '><p class="muted">Count the <b>boxes</b> of each. Check the number in a box beside each heading – change it if a box holds a different amount. Labels: count the rolls (a part roll can be a half, e.g. 2.5). Leave a box empty if you didn\'t count it. Anything not on the list – add it at the bottom.</p>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('g_date', today(), 'date')) + field('Counted by', staffSel('g_by')) + '</div></div>' +
     (names.length ? '' : '<div class="card muted">The packaging list is still being set up – add items at the bottom.</div>') +
     names.map(function (g, gi) {
@@ -1924,9 +1951,33 @@ ROUTES.packaging = function () {
             : '<tr data-p="' + esc(i.item) + '" data-g="' + esc(g) + '" data-gi="' + gi + '" data-unit="' + esc(i.unit) + '"><td>' + esc(short_(i.item)) + '</td><td style="width:120px"><input data-k="boxes" inputmode="decimal"></td><td class="stat" data-t="tot">–</td><td class="muted small">' + esc(lastTxt) + '</td></tr>';
         }).join('') +
         '<tr style="border-top:2px solid #1c2140"><td><b>Total</b></td><td><b data-sum="a">–</b></td><td' + (roll ? ' colspan="2"' : '') + '><b data-sum="b">–</b></td><td></td></tr></table></div>';
-    }).join('') +
+    }).join('') + '</div>' +
     '<div class="card"><h2>Something not on the list?</h2><p class="muted small">It\'s added to the list for next time.</p><table class="t" id="g_new"></table><button class="btn soft sm" id="g_addrow" type="button">+ Add another</button></div>' +
-    '<div class="bar"><button class="btn" id="g_save">Save count</button></div>');
+    '<div class="bar"><button class="btn" id="g_save">Save</button></div>');
+  if ($('#g_full')) $('#g_full').onclick = function () { S.pFull = !S.pFull; var on = $('#g_fullbox').style.display === 'none'; $('#g_fullbox').style.display = on ? '' : 'none'; this.textContent = on ? 'Hide the full count' : 'Do a full count'; };
+  $$('[data-pedit]').forEach(function (b) { b.onclick = function () {
+    var n = b.dataset.pedit, i = items.find(function (x) { return x.item === n; }) || {}, g = i.group, roll = isRoll(g), w = roll ? 'labels' : word(g);
+    var pb = i.perBox || (groups[g].find(function (x) { return x.perBox; }) || {}).perBox || '', pr = i.perRoll || '';
+    var e = est[n], cur = e ? e.est : (last[n] ? Number(last[n].qty) || 0 : '');
+    var td = b.closest('tr').querySelector('[data-left]');
+    var opts = roll ? (pr ? ['rolls', 'labels'] : ['labels']) : (pb ? ['boxes', w] : [w]);
+    td.innerHTML = '<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="number" inputmode="decimal" style="width:100px" value="' + esc(cur) + '"><select>' + opts.map(function (o) { return '<option' + (o === w || o === 'labels' ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>' +
+      (roll && pr ? '<span class="small muted">' + pr + ' per roll</span>' : !roll && pb ? '<span class="small muted">' + pb + ' in a box</span>' : '') + '<button class="btn sm" type="button">Save</button></span>';
+    b.style.display = 'none';
+    var inpt = td.querySelector('input'), sel = td.querySelector('select'); inpt.focus(); inpt.select();
+    td.querySelector('button').onclick = function () {
+      var v = num(inpt.value); if (v === '') return toast('Put in how many are there');
+      var u = sel.value, c = { item: n, group: g, unit: roll ? 'labels' : i.unit };
+      if (u === 'boxes') { c.boxes = v; c.perBox = pb; c.qty = Math.round(v * pb); }
+      else if (u === 'rolls') { c.rolls = v; c.perRoll = pr; c.qty = Math.round(v * pr); }
+      else c.qty = Math.round(v);
+      record('packStock', { id: uid(), date: today(), by: S.user, counts: [c] }, short_(n) + ' updated to ' + c.qty + ' ' + w);
+      D().pack = D().pack || {}; est[n] = D().pack[n] = { counted: today(), qty: c.qty, used: 0, est: c.qty };
+      if (S.own && S.own.pack) S.own.pack[n] = est[n];
+      save(LS.data, S.data);
+      td.innerHTML = leftTxt(i, g); b.style.display = '';
+    };
+  }; });
   function addRow() { var tr = document.createElement('tr'); tr.className = 'newpack'; tr.innerHTML = '<td><input placeholder="Item, e.g. Napoli lids" data-k="name"></td><td style="width:110px"><input placeholder="Boxes" inputmode="decimal" data-k="boxes"></td><td style="width:110px"><input placeholder="In a box" inputmode="numeric" data-k="pb"></td><td><input placeholder="Group, e.g. Boxes" data-k="group" list="dl_pg"></td>'; $('#g_new').appendChild(tr); }
   $('#g_new').insertAdjacentHTML('afterend', '<datalist id="dl_pg">' + names.concat(['Other']).map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>');
   addRow(); $('#g_addrow').onclick = addRow;
