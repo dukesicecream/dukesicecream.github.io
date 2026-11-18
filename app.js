@@ -44,8 +44,10 @@ function render(html) { var app = $('#app'); app.removeAttribute('data-dirty'); 
 /* ---------- setup & who is using it ---------- */
 function boot() {
   $('#logo').src = window.LOGO || 'icon.svg';
-  var m = location.hash.match(/setup=([\w-]+)/);
-  if (m) { localStorage.setItem(LS.key, m[1]); history.replaceState(null, '', location.pathname + '#home'); }
+  // the set-up code stays in the web address, so "Add to Home Screen" on an iPad/iPhone copies it across
+  // (the home-screen app has its own separate storage and would otherwise say it isn't set up)
+  var m = location.hash.match(/setup=([\w-]+)/) || location.search.match(/[?&]setup=([\w-]+)/);
+  if (m) { localStorage.setItem(LS.key, m[1]); history.replaceState(null, '', location.pathname + '?setup=' + m[1] + '#home'); }
   S.key = localStorage.getItem(LS.key) || '';
   S.user = localStorage.getItem(LS.user) || '';
   S.jcode = localStorage.getItem('dk_jcode') || null;
@@ -188,7 +190,14 @@ function route() {
 }
 function setupScreen() {
   return '<div class="card center" style="max-width:560px;margin:40px auto"><h1>Welcome</h1><p>This tablet or phone isn\'t set up yet.</p>' +
-    '<p class="muted">Open the set-up link Jonny sent (it ends in <b>#setup=…</b>) on this device once. After that the app works here, even with no internet.</p></div>';
+    '<p class="muted">Open the set-up link Jonny sent (it ends in <b>#setup=…</b>) on this device once. After that the app works here, even with no internet.</p>' +
+    '<p style="margin-top:18px"><b>Opened from the home screen?</b> Copy the set-up link from the message, paste it here and tap Set up.</p>' +
+    '<input id="su_link" placeholder="Paste the set-up link" style="width:100%;margin:6px 0 10px"><button class="btn" id="su_go" type="button" onclick="setupFromPaste()">Set up</button></div>';
+}
+function setupFromPaste() {
+  var m = String(($('#su_link') || {}).value || '').match(/setup=([\w-]+)/);
+  if (!m) return toast('That doesn\'t look like the set-up link – it should end in #setup=…');
+  localStorage.setItem(LS.key, m[1]); history.replaceState(null, '', location.pathname + '?setup=' + m[1] + '#home'); location.reload();
 }
 
 ROUTES.who = function () {
