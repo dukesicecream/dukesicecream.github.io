@@ -1025,7 +1025,7 @@ ROUTES.ingstock = function () {
     var r = rs.find(function (q) { return q.flavour === 'All flavours (base mix)'; }) || rs[0]; if (!r || fam(r.unit) !== fam(x.unit)) return '';
     var per = toB(Number(r.amount) / perOf(r) * BL, r.unit); if (!per) return '';
     var b = toB(Number(x.est), x.unit) / per;
-    return ' · enough for about <b>' + (b < 10 ? r2(b, 1) : Math.floor(b)) + ' batch' + (r2(b, 1) === 1 ? '' : 'es') + '</b>' + (r.flavour === 'All flavours (base mix)' ? '' : ' of ' + esc(r.flavour));
+    return ' · enough for about <b>' + (b < 10 ? r2(b, 1) : Math.floor(b)) + ' × ' + BL + ' L batch' + (r2(b, 1) === 1 ? '' : 'es') + '</b>' + (r.flavour === 'All flavours (base mix)' ? '' : ' of ' + esc(r.flavour));
   };
   // e.g. 15 kg = 3 bags
   var packsOf = function (n, x) {
@@ -1033,7 +1033,8 @@ ROUTES.ingstock = function () {
     if (x.est == null || !i.packSize) return '';
     var pu = i.countUnit || i.unit; if (fam(pu) !== fam(x.unit)) return '';
     var k = toB(Number(x.est), x.unit) / toB(Number(i.packSize), pu);
-    return ' <span class="muted">– ' + r2(k, 1) + ' ' + esc(i.packType || (r2(k, 1) === 1 ? 'pack' : 'packs')) + '</span>';
+    var t = String(i.packType || 'pack').replace(/s$/, ''); if (r2(k, 1) !== 1) t += 's';
+    return ' <span class="muted">– ' + r2(k, 1) + ' ' + esc(t) + '</span>';
   };
   var units = ['kg', 'g', 'L', 'ml', 'each', 'buckets'];
   var catList = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Cleaning products', 'Other'])));
