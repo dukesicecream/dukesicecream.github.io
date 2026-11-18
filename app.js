@@ -1016,6 +1016,25 @@ ROUTES.ingstock = function () {
     return lotsOn(n).map(function (l) { return '<div class="small">' + (l.batch ? 'Batch <b>' + esc(l.batch) + '</b>' : '<span class="muted">no batch no.</span>') + (l.bb ? ' · ' + bbTag(l.bb) : '') + (l.del ? ' <span class="muted">(delivery)</span>' : '') + '</div>'; }).join('') || '<span class="small muted">–</span>';
   };
   var isSoon = function (n) { return lotsOn(n).some(function (l) { return l.bb && l.bb < soonIso; }); };
+  // how many batches what's in stock will make (base mix amount for base ingredients, otherwise the flavour that uses it)
+  var fam = function (u) { u = String(u || '').toLowerCase(); return u === 'kg' || u === 'g' ? 'w' : u === 'l' || u === 'ml' || /litre/.test(u) ? 'v' : u; };
+  var toB = function (q, u) { u = String(u || '').toLowerCase(); return u === 'g' || u === 'ml' ? q / 1000 : q; };
+  var batchesOf = function (n, x) {
+    if (x.est == null) return '';
+    var BL = setN('Base mix litres', 300), rs = (D().recipe || []).filter(function (r) { return String(r.ingredient).toLowerCase() === n.toLowerCase() && Number(r.amount) > 0; });
+    var r = rs.find(function (q) { return q.flavour === 'All flavours (base mix)'; }) || rs[0]; if (!r || fam(r.unit) !== fam(x.unit)) return '';
+    var per = toB(Number(r.amount) / perOf(r) * BL, r.unit); if (!per) return '';
+    var b = toB(Number(x.est), x.unit) / per;
+    return ' · enough for about <b>' + (b < 10 ? r2(b, 1) : Math.floor(b)) + ' batch' + (r2(b, 1) === 1 ? '' : 'es') + '</b>' + (r.flavour === 'All flavours (base mix)' ? '' : ' of ' + esc(r.flavour));
+  };
+  // e.g. 15 kg = 3 bags
+  var packsOf = function (n, x) {
+    var i = (D().ingredients || []).find(function (q) { return q.name === n; }) || {};
+    if (x.est == null || !i.packSize) return '';
+    var pu = i.countUnit || i.unit; if (fam(pu) !== fam(x.unit)) return '';
+    var k = toB(Number(x.est), x.unit) / toB(Number(i.packSize), pu);
+    return ' <span class="muted">– ' + r2(k, 1) + ' ' + esc(i.packType || (r2(k, 1) === 1 ? 'pack' : 'packs')) + '</span>';
+  };
   var units = ['kg', 'g', 'L', 'ml', 'each', 'buckets'];
   var catList = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Cleaning products', 'Other'])));
   var curHtml = '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">In stock now</h2><button class="btn soft sm" type="button" id="i_full">' + (showFull ? 'Hide the full count' : 'Do a full count') + '</button></div>' +
@@ -1023,7 +1042,7 @@ ROUTES.ingstock = function () {
     delGroups((D().ingredients || []).filter(function (i) { return i.track !== false && !/packag/i.test(i.category || ''); })).map(function (g) {
       return '<h3>' + esc(g[0]) + '</h3><div class="scroll"><table class="t">' + g[1].map(function (n) {
         var x = now[n] || {};
-        return '<tr data-cur="' + esc(n) + '"' + (isSoon(n) ? ' style="background:#fdecea"' : '') + '><td>' + esc(n) + '</td><td data-amt><b>' + amt(x.est, x.unit) + '</b>' + (x.counted ? '<br><span class="small muted">counted ' + esc(short(x.counted)) + (x.weeksLeft != null ? ' · about ' + x.weeksLeft + ' weeks left' : '') + '</span>' : '') + '</td><td data-lots>' + lotsHtml(n) + '</td><td style="width:70px"><button class="btn soft sm" type="button" data-edit="' + esc(n) + '">Edit</button></td></tr>';
+        return '<tr data-cur="' + esc(n) + '"' + (isSoon(n) ? ' style="background:#fdecea"' : '') + '><td>' + esc(n) + '</td><td data-amt><b>' + amt(x.est, x.unit) + '</b>' + packsOf(n, x) + (x.counted ? '<br><span class="small muted">counted ' + esc(short(x.counted)) + batchesOf(n, x) + '</span>' : '') + '</td><td data-lots>' + lotsHtml(n) + '</td><td style="width:70px"><button class="btn soft sm" type="button" data-edit="' + esc(n) + '">Edit</button></td></tr>';
       }).join('') + '</table></div>';
     }).join('') + '</div>' +
     '<div class="card"><h2>Add a new item</h2><p class="muted small">For something that isn\'t on the list yet.</p>' +
@@ -1066,7 +1085,7 @@ ROUTES.ingstock = function () {
       now[n] = Object.assign({}, x, { est: q, counted: today(), unit: uu });
       D().stockLots = D().stockLots || {}; if (lots.length) D().stockLots[n] = { date: today(), lots: lots }; else delete D().stockLots[n];
       save(LS.data, S.data);
-      td.innerHTML = '<b>' + amt(q, uu) + '</b><br><span class="small muted">counted ' + esc(short(today())) + '</span>';
+      td.innerHTML = '<b>' + amt(q, uu) + '</b>' + packsOf(n, now[n]) + '<br><span class="small muted">counted ' + esc(short(today())) + batchesOf(n, now[n]) + '</span>';
       tl.innerHTML = lotsHtml(n); tr.style.background = isSoon(n) ? '#fdecea' : ''; b.style.display = '';
     };
   }; });
