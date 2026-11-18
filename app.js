@@ -317,8 +317,11 @@ function myMessages() {
 /* ---------- production: batch records ---------- */
 function lotsFor(name) {
   var n = String(name || '').toLowerCase();
-  return (D().lots || []).filter(function (l) { return l.status !== 'Finished' && String(l.item || '').toLowerCase() === n; })
-    .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  // batches entered on the stock page come first (they're what's already on the shelf), then deliveries
+  var st = null; Object.keys(D().stockLots || {}).forEach(function (k) { if (k.toLowerCase() === n) st = D().stockLots[k]; });
+  var shelf = ((st && st.lots) || []).map(function (l, i) { return { id: 'stock' + i, date: st.date, item: name, batch: l.batch || '', useBy: l.bb || '', status: 'Open', stock: true }; });
+  return shelf.concat((D().lots || []).filter(function (l) { return l.status !== 'Finished' && String(l.item || '').toLowerCase() === n; })
+    .sort(function (a, b) { return a.date < b.date ? -1 : 1; }));
 }
 function isDairy(n) { return /milk|cream/i.test(n) && !/powder/i.test(n); }
 function rq(n, q) { return q === '' || q == null || isNaN(Number(q)) ? q : isDairy(n) ? Math.round(Number(q)) : r2(Number(q), 3); }
@@ -981,16 +984,42 @@ ROUTES.ingstock = function () {
   };
   // once everything has been counted, this page shows what's in stock now (last count + deliveries – what batches used)
   var now = {}; (D().ingNow || []).forEach(function (g) { now[g.name] = g; });
-  var hasCounts = (D().ingNow || []).some(function (g) { return g.est != null; }), showFull = !hasCounts || S.fullCount;
+  var hasCounts = (D().ingNow || []).some(function (g) { return g.est != null; }), showFull = !!S.fullCount;
   var amt = function (q, u) { if (q == null) return '<span class="muted">not counted yet</span>'; var lu = String(u || '').toLowerCase(); return lu === 'g' && q >= 1000 ? r2(q / 1000, 2) + ' kg' : lu === 'kg' && q < 1 ? Math.round(q * 1000) + ' g' : (Math.round(q * 100) / 100).toLocaleString('en-GB') + ' ' + esc(u || ''); };
-  var curHtml = !hasCounts ? '' : '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">In stock now</h2><button class="btn soft sm" type="button" id="i_full">' + (showFull ? 'Hide the full count' : 'Do a full count') + '</button></div>' +
-    '<p class="muted small">Worked out from the last count, plus deliveries, less what the batches used. If something\'s wrong, tap <b>Edit</b> and put in what\'s really there.</p>' +
+  // batch numbers & best before dates: entered on this page, plus any deliveries since the last count
+  var soon = new Date(); soon.setMonth(soon.getMonth() + 2); var soonIso = soon.toISOString().slice(0, 10), todayIso = today();
+  var lotsOn = function (n) {
+    var x = now[n] || {}, st = (D().stockLots || {})[n], out = ((st && st.lots) || []).map(function (l) { return { batch: l.batch, bb: l.bb }; });
+    var since = x.counted || '';
+    (D().lots || []).forEach(function (l) { if (l.status !== 'Finished' && String(l.item).toLowerCase() === n.toLowerCase() && (!since || l.date > since)) out.push({ batch: l.batch, bb: /^\d{4}-\d{2}-\d{2}$/.test(l.useBy || '') ? l.useBy : '', del: true }); });
+    return out;
+  };
+  var bbTag = function (bb) {
+    if (!bb) return '';
+    var d = parse(bb), txt = d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : bb;
+    if (bb < todayIso) return '<b style="color:#b3261e">BB ' + esc(txt) + ' – out of date</b>';
+    if (bb < soonIso) return '<b style="color:#b3261e">BB ' + esc(txt) + ' ⚠</b>';
+    return 'BB ' + esc(txt);
+  };
+  var lotsHtml = function (n) {
+    return lotsOn(n).map(function (l) { return '<div class="small">' + (l.batch ? 'Batch <b>' + esc(l.batch) + '</b>' : '<span class="muted">no batch no.</span>') + (l.bb ? ' · ' + bbTag(l.bb) : '') + (l.del ? ' <span class="muted">(delivery)</span>' : '') + '</div>'; }).join('') || '<span class="small muted">–</span>';
+  };
+  var isSoon = function (n) { return lotsOn(n).some(function (l) { return l.bb && l.bb < soonIso; }); };
+  var units = ['kg', 'g', 'L', 'ml', 'each', 'buckets'];
+  var catList = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Cleaning products', 'Other'])));
+  var curHtml = '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">In stock now</h2><button class="btn soft sm" type="button" id="i_full">' + (showFull ? 'Hide the full count' : 'Do a full count') + '</button></div>' +
+    '<p class="muted small">Worked out from the last count, plus deliveries, less what the batches used. Tap <b>Edit</b> to put in what\'s really there, with its batch numbers and best before dates. Anything with less than 2 months left is shown in <b style="color:#b3261e">red</b>.</p>' +
     delGroups((D().ingredients || []).filter(function (i) { return i.track !== false && !/packag/i.test(i.category || ''); })).map(function (g) {
-      return '<h3>' + esc(g[0]) + '</h3><table class="t">' + g[1].map(function (n) {
+      return '<h3>' + esc(g[0]) + '</h3><div class="scroll"><table class="t">' + g[1].map(function (n) {
         var x = now[n] || {};
-        return '<tr data-cur="' + esc(n) + '"><td>' + esc(n) + '</td><td data-amt><b>' + amt(x.est, x.unit) + '</b>' + (x.counted ? '<br><span class="small muted">counted ' + esc(short(x.counted)) + (x.weeksLeft != null ? ' · about ' + x.weeksLeft + ' weeks left' : '') + '</span>' : '') + '</td><td style="width:70px"><button class="btn soft sm" type="button" data-edit="' + esc(n) + '">Edit</button></td></tr>';
-      }).join('') + '</table>';
-    }).join('') + '</div>';
+        return '<tr data-cur="' + esc(n) + '"' + (isSoon(n) ? ' style="background:#fdecea"' : '') + '><td>' + esc(n) + '</td><td data-amt><b>' + amt(x.est, x.unit) + '</b>' + (x.counted ? '<br><span class="small muted">counted ' + esc(short(x.counted)) + (x.weeksLeft != null ? ' · about ' + x.weeksLeft + ' weeks left' : '') + '</span>' : '') + '</td><td data-lots>' + lotsHtml(n) + '</td><td style="width:70px"><button class="btn soft sm" type="button" data-edit="' + esc(n) + '">Edit</button></td></tr>';
+      }).join('') + '</table></div>';
+    }).join('') + '</div>' +
+    '<div class="card"><h2>Add a new item</h2><p class="muted small">For something that isn\'t on the list yet.</p>' +
+    '<div class="grid2">' + field('Item', '<input id="n_name" placeholder="e.g. Pistachio paste">') + field('Section', '<select id="n_cat">' + catList.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select>') + '</div>' +
+    '<div class="grid2">' + field('How much is there', '<span style="display:flex;gap:6px"><input id="n_qty" inputmode="decimal" style="width:110px"><select id="n_unit">' + units.map(function (u) { return '<option>' + u + '</option>'; }).join('') + '</select></span>') + field('Supplier (if known)', '<input id="n_sup" list="dl_sups2">') + '</div>' +
+    '<div id="n_lots"></div><button class="btn soft sm" type="button" id="n_addlot">+ another batch</button>' +
+    '<div class="bar"><button class="btn" type="button" id="n_save">Save new item</button></div></div>';
   render(back() + '<h1>Stock – ingredients & cleaning products</h1>' + curHtml + '<div id="i_fullbox"' + (showFull ? '' : ' style="display:none"') + '><p class="muted">Put how many and the size of each, e.g. <b>8</b> × <b>25</b> kg sugar, <b>2</b> × <b>3</b> kg bubblegum. For things like bleach just put how many and choose <b>each</b>. Sizes are remembered for next time. Leave a line empty if you didn\'t count it. Packaging is counted on the Packaging stock tab.</p>' +
     '<div class="card"><div class="grid2">' + field('Date', inp('i_date', today(), 'date')) + field('Counted by', staffSel('i_by')) + '</div></div>' +
     catNames.map(function (c) {
@@ -1007,18 +1036,44 @@ ROUTES.ingstock = function () {
     '<div class="bar"><button class="btn" id="i_save">Save count</button></div></div>' +
     '');
   if ($('#i_full')) $('#i_full').onclick = function () { S.fullCount = !S.fullCount; var on = $('#i_fullbox').style.display === 'none'; $('#i_fullbox').style.display = on ? '' : 'none'; this.textContent = on ? 'Hide the full count' : 'Do a full count'; };
+  // one line per batch: batch number + best before date
+  var lotLine = function (l) { return '<div data-lot style="display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap"><input data-b placeholder="Batch no." value="' + esc((l && l.batch) || '') + '" style="width:130px"><input data-bb type="date" value="' + esc((l && l.bb) || '') + '" style="width:150px"><span class="small muted">best before</span></div>'; };
+  var readLots = function (box) { return $$('[data-lot]', box).map(function (r) { return { batch: r.querySelector('[data-b]').value.trim(), bb: r.querySelector('[data-bb]').value }; }).filter(function (l) { return l.batch || l.bb; }); };
   $$('[data-edit]').forEach(function (b) { b.onclick = function () {
     var n = b.dataset.edit, x = now[n] || {}, ing = (D().ingredients || []).find(function (i) { return i.name === n; }) || {}, u = x.unit || ing.unit || '';
-    var td = b.closest('tr').querySelector('[data-amt]');
-    td.innerHTML = '<span style="display:flex;gap:6px;align-items:center"><input type="number" inputmode="decimal" style="width:100px" value="' + (x.est == null ? '' : Math.round(x.est * 100) / 100) + '"> ' + esc(u) + ' <button class="btn sm" type="button">Save</button></span>';
+    var tr = b.closest('tr'), td = tr.querySelector('[data-amt]'), tl = tr.querySelector('[data-lots]');
+    var st = (D().stockLots || {})[n], have = (st && st.lots) || [];
+    td.innerHTML = '<span style="display:flex;gap:6px;align-items:center"><input type="number" inputmode="decimal" style="width:100px" value="' + (x.est == null ? '' : Math.round(x.est * 100) / 100) + '"> ' + (u ? esc(u) : '<select data-u>' + units.map(function (z) { return '<option>' + z + '</option>'; }).join('') + '</select>') + '</span>';
+    tl.innerHTML = '<div data-box>' + (have.length ? have : [{}]).map(lotLine).join('') + '</div><button class="btn soft sm" type="button" data-more>+ another batch</button> <button class="btn sm" type="button" data-save>Save</button>';
+    b.style.display = 'none';
     var inpt = td.querySelector('input'); inpt.focus(); inpt.select();
-    td.querySelector('button').onclick = function () {
+    tl.querySelector('[data-more]').onclick = function () { tl.querySelector('[data-box]').insertAdjacentHTML('beforeend', lotLine({})); };
+    tl.querySelector('[data-save]').onclick = function () {
       var q = num(inpt.value); if (q === '') return toast('Put in how much is there');
-      record('ingStock', { id: uid(), date: today(), by: S.user, counts: [{ ingredient: n, qty: q, unit: u }] }, n + ' updated to ' + q + ' ' + u);
-      now[n] = Object.assign({}, x, { est: q, counted: today(), unit: u });
-      td.innerHTML = '<b>' + amt(q, u) + '</b><br><span class="small muted">counted ' + esc(short(today())) + '</span>';
+      var uu = u || td.querySelector('[data-u]').value, lots = readLots(tl);
+      record('ingStock', { id: uid(), date: today(), by: S.user, counts: [{ ingredient: n, qty: q, unit: uu, lots: lots }] }, n + ' updated');
+      now[n] = Object.assign({}, x, { est: q, counted: today(), unit: uu });
+      D().stockLots = D().stockLots || {}; if (lots.length) D().stockLots[n] = { date: today(), lots: lots }; else delete D().stockLots[n];
+      save(LS.data, S.data);
+      td.innerHTML = '<b>' + amt(q, uu) + '</b><br><span class="small muted">counted ' + esc(short(today())) + '</span>';
+      tl.innerHTML = lotsHtml(n); tr.style.background = isSoon(n) ? '#fdecea' : ''; b.style.display = '';
     };
   }; });
+  // add a brand-new item with its batch numbers
+  $('#n_lots').innerHTML = lotLine({});
+  $('#n_addlot').onclick = function () { $('#n_lots').insertAdjacentHTML('beforeend', lotLine({})); };
+  $('#n_save').onclick = function () {
+    var name = val('n_name'), q = num(val('n_qty')), uu = val('n_unit'), cat = val('n_cat');
+    if (!name) return toast('What is the item called?');
+    if ((D().ingredients || []).some(function (i) { return i.name.toLowerCase() === name.toLowerCase(); })) return toast(name + ' is already on the list – use its Edit button');
+    if (q === '') return toast('Put in how much is there');
+    var lots = readLots($('#n_lots'));
+    record('ingStock', { id: uid(), date: today(), by: S.user, counts: [{ ingredient: name, qty: q, unit: uu, category: cat, supplier: val('n_sup'), lots: lots }] }, name + ' added');
+    (D().ingredients = D().ingredients || []).push({ name: name, unit: uu, category: cat, supplier: val('n_sup'), track: true });
+    (D().ingNow = D().ingNow || []).push({ name: name, unit: uu, est: q, counted: today() });
+    D().stockLots = D().stockLots || {}; if (lots.length) D().stockLots[name] = { date: today(), lots: lots };
+    save(LS.data, S.data); route();
+  };
   var catOpts = Array.from(new Set(catNames.concat(['Dry goods', 'Flavouring', 'Cleaning products', 'Other'])));
   function addRow() { var tr = document.createElement('tr'); tr.className = 'newing'; tr.innerHTML = '<td><input placeholder="Name, e.g. Sugar" data-k="name"></td>' + line({}) + '<td><select data-k="cat">' + catOpts.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></td><td><input placeholder="Who supplies it? (if known)" data-k="sup" list="dl_sups2"></td>'; $('#i_new').appendChild(tr); wire(tr); }
   $('#i_new').insertAdjacentHTML('afterend', '<datalist id="dl_sups2">' + Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).filter(Boolean))).sort().map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>');
