@@ -1,7 +1,6 @@
 {
   "name": "Dukes Production",
   "short_name": "Dukes",
-  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
