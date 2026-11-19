@@ -359,7 +359,7 @@ function disp(n, q, u) {
 function perOf(l) { return Number(l.per) || setN('Base mix litres', 300); }
 // Jonny's pages that only read: the answer is kept for a few minutes so going back to a page is instant.
 // Anything saved (on this device or by Jonny) clears the kept answers.
-var OREAD = { totals: 1, shop: 1, finance: 1, xmas: 1, weddings: 1, batches: 1 };
+var OREAD = { totals: 1, shop: 1, finance: 1, xmas: 1, weddings: 1, batches: 1, shopsum: 1 };
 function ownerCall(body) {
   var key = OREAD[body.op] && !body.d ? body.op : null;
   S.oc = S.oc || {};
@@ -1161,7 +1161,8 @@ ROUTES.packing = function (no) {
   var orders = (D().orders || []).filter(function (o) { return o.status === 'Confirmed' || o.status === 'Packing'; });
   if (!no) {
     var done = (D().orders || []).filter(function (o) { return o.status === 'Packed'; }).slice(-10).reverse();
-    return render(back() + '<h1>Shop orders</h1><div class="card"><h2>To pack</h2><div class="list">' + (orders.map(function (o) {
+    if (isOwner()) setTimeout(shopSumList, 0);
+    return render(back() + '<h1>Shop orders</h1>' + (isOwner() ? '<div class="card" id="shopsums"><h2>Shops</h2><p class="muted small">Loading…</p></div>' : '') + '<div class="card"><h2>To pack</h2><div class="list">' + (orders.map(function (o) {
       return '<a class="row" href="#packing/' + encodeURIComponent(o.no) + '"><span><b>' + esc(o.shop) + '</b> · ' + esc(o.no) + '<br><span class="muted">' + esc(nice(o.date)) + ' · ' + (o.small || 0) + ' small, ' + (o.large || 0) + ' large</span></span><span class="pill warn">' + esc(o.status === 'Packing' ? 'Started' : 'To pack') + '</span></a>';
     }).join('') || '<p class="muted">No orders waiting.</p>') + '</div></div>' +
       (!isOwner() ? '' : '<div class="card"><h2>Recently packed</h2><div class="list">' + (done.map(function (o) { return '<a class="row" href="#packing/' + encodeURIComponent(o.no) + '"><span>' + esc(o.shop) + ' · ' + esc(o.no) + '<br><span class="muted">' + esc(o.packedBy || '') + '</span></span><span class="pill ok">Packed</span></a>'; }).join('') || '<p class="muted">None yet.</p>') + '</div></div>'));
@@ -1650,6 +1651,48 @@ function ownLoad(title, op, draw, d) {
   ownerCall({ op: op, d: d }).then(function (r) { if (location.hash !== here) return; if (!r.ok) { toast(r.error || 'Could not open'); return; } draw(r); })
     .catch(function () { render(back('office', 'Office') + '<h1>' + esc(title) + '</h1><div class="card">No connection.</div>'); });
 }
+
+// Jonny only: each shop's buying – tap a shop for its summary, tap an order date for what was in it
+function shopSumList() {
+  if (!isOwner() || !navigator.onLine) { if ($('#shopsums')) $('#shopsums').innerHTML = '<h2>Shops</h2><p class="muted small">Needs the internet.</p>'; return; }
+  ownerCall({ op: 'shopsum' }).then(function (r) {
+    var box = $('#shopsums'); if (!box || !r.ok) return;
+    var list = r.shops || [];
+    box.innerHTML = '<h2>Shops</h2><p class="muted small">Only you see this. Tap a shop to see what they\'ve been buying.</p>' +
+      (list.length ? '<div class="list">' + list.map(function (x) {
+        return '<a class="row" href="#shopsum/' + encodeURIComponent(x.shop) + '"><span><b>' + esc(x.shop) + '</b><br><span class="muted small">' + (x.orders.length ? x.orders.length + ' order' + (x.orders.length === 1 ? '' : 's') + ' · last ' + esc(short(x.last)) : 'No orders yet') + '</span></span><span>›</span></a>';
+      }).join('') + '</div>' : '<p class="muted">No shops yet – add them on the Shops tab of the Google Sheet.</p>');
+  }).catch(function () { });
+}
+ROUTES.shopsum = function (name) {
+  if (onlyJonny('Shop summary')) return;
+  var hd = back('packing', 'Shop orders') + '<h1>' + esc(name) + '</h1>';
+  if (!navigator.onLine) return render(hd + '<div class="card">This page needs the internet.</div>');
+  render(hd + '<p class="muted center">Loading…</p>');
+  var here = location.hash;
+  ownerCall({ op: 'shopsum' }).then(function (r) {
+    if (location.hash !== here) return;
+    var x = (r.shops || []).find(function (q) { return q.shop === name; });
+    if (!x) return render(hd + '<div class="card">No orders found for this shop.</div>');
+    var top = function (a) { return a.length ? '<ol style="margin:4px 0 0;padding-left:20px">' + a.map(function (t) { return '<li>' + esc(t[0]) + ' – <b>' + t[1] + '</b></li>'; }).join('') + '</ol>' : '<p class="muted small">None yet</p>'; };
+    render(hd +
+      '<div class="card"><div class="grid3" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;text-align:center">' +
+        '<div><div class="stat">' + gbp(x.spend) + '</div><div class="muted small">spent to date (before VAT)</div></div>' +
+        '<div><div class="stat">' + x.small.toLocaleString('en-GB') + '</div><div class="muted small">small tubs</div></div>' +
+        '<div><div class="stat">' + x.large.toLocaleString('en-GB') + '</div><div class="muted small">big tubs</div></div>' +
+        '<div><div class="stat">' + x.orders.length + '</div><div class="muted small">orders</div></div></div></div>' +
+      '<div class="card"><div class="grid2"><div><h3>Top small tub flavours</h3>' + top(x.topSmall) + '</div><div><h3>Top big tub flavours</h3>' + top(x.topLarge) + '</div></div></div>' +
+      '<div class="card"><h2>Orders</h2><p class="muted small">Tap a date to see what was ordered.</p>' +
+      (x.orders.length ? x.orders.map(function (o, i) {
+        var sm = o.lines.filter(function (l) { return l.size !== 'large'; }).reduce(function (a, l) { return a + l.qty; }, 0), lg = o.lines.reduce(function (a, l) { return a + (l.size === 'large' ? l.qty : 0); }, 0);
+        return '<div style="border-bottom:1px solid #eee"><a href="#" class="row" data-ord="' + i + '" style="display:flex;justify-content:space-between;padding:10px 4px"><span><b>' + esc(nice(o.date)) + '</b> <span class="muted small">' + esc(o.no) + ' · ' + esc(o.status) + '</span><br><span class="muted small">' + sm + ' small, ' + lg + ' big</span></span><b>' + gbp(o.total) + '</b></a>' +
+          '<div data-det="' + i + '" style="display:none;padding:0 4px 10px"><table class="t"><tr><th>Flavour</th><th>Size</th><th>Qty</th><th>Each</th><th>Total</th></tr>' +
+          o.lines.map(function (l) { return '<tr><td>' + esc(l.flavour) + '</td><td>' + (l.size === 'large' ? 'big' : 'small') + '</td><td>' + l.qty + '</td><td>' + gbp(l.price) + '</td><td>' + gbp(l.qty * l.price) + '</td></tr>'; }).join('') +
+          '<tr><td colspan="4"><b>Order total</b> <span class="muted small">(before VAT)</span></td><td><b>' + gbp(o.total) + '</b></td></tr></table></div></div>';
+      }).join('') : '<p class="muted">No orders yet.</p>') + '</div>');
+    $$('[data-ord]').forEach(function (a) { a.onclick = function (e) { e.preventDefault(); var d = $('[data-det="' + a.dataset.ord + '"]'); d.style.display = d.style.display === 'none' ? '' : 'none'; }; });
+  }).catch(function () { render(hd + '<div class="card">No connection.</div>'); });
+};
 
 // My to do
 ROUTES.jtodo = function () { ownLoad('My to do', 'jtodo', drawJtodo); };
