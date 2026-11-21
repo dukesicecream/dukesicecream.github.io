@@ -327,13 +327,21 @@ function lotsFor(name) {
   var bb = function (l) { return /^\d{4}-\d{2}-\d{2}$/.test(l.useBy || '') ? l.useBy : '9999'; };
   return all.sort(function (a, b) { return bb(a) !== bb(b) ? (bb(a) < bb(b) ? -1 : 1) : (a.stock !== b.stock ? (a.stock ? -1 : 1) : (a.date < b.date ? -1 : 1)); });
 }
-// on the recipe: when there's more than one batch of an ingredient, which to use first
+// on the recipe: which batch to use first when there's more than one, and anything with no best before
 function useFirst(ing) {
-  var lots = lotsFor(ing); if (lots.length < 2) return '';
+  var lots = lotsFor(ing), out = '';
   var d = function (x) { var p = parse(x); return p ? p.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : ''; };
-  return '<tr><td colspan="3" style="padding:0 6px 8px"><div style="background:#fdecea;border-left:4px solid #b3261e;border-radius:6px;padding:6px 8px;font-size:14px">⚠ <b>Use the oldest first:</b> ' +
-    lots.map(function (l, i) { var t = (l.batch ? 'batch ' + esc(l.batch) : 'no batch no.') + (l.useBy && d(l.useBy) ? ' (BB ' + esc(d(l.useBy)) + ')' : l.date ? ' (in ' + esc(d(l.date)) + ')' : ''); return i === 0 ? '<b style="color:#b3261e">1st ' + t + '</b>' : (i + 1) + (i === 1 ? 'nd' : i === 2 ? 'rd' : 'th') + ' ' + t; }).join(' → ') +
-    '<br><span class="small muted">Use all of the first one before opening the next – it\'s fine if it\'s all used up.</span></div></td></tr>';
+  var full = function (x) { return /^\d{4}-\d{2}-\d{2}$/.test(x || ''); };
+  var box = function (html) { return '<tr><td colspan="3" style="padding:0 6px 8px"><div style="background:#fdecea;border-left:4px solid #b3261e;border-radius:6px;padding:6px 8px;font-size:14px">' + html + '</div></td></tr>'; };
+  if (lots.length > 1) out += box('⚠ <b>Use the oldest first:</b> ' + lots.map(function (l, i) {
+    var t = (l.batch ? 'batch ' + esc(l.batch) : 'no batch no.') + (full(l.useBy) ? ' (BB ' + esc(d(l.useBy)) + ')' : ' <b>(no best before)</b>');
+    return i === 0 ? '<b style="color:#b3261e">1st ' + t + '</b>' : (i + 1) + (i === 1 ? 'nd' : i === 2 ? 'rd' : 'th') + ' ' + t; }).join(' → '));
+  if (!/sugar|salt/i.test(ing)) {
+    var noBB = lots.filter(function (l) { return !full(l.useBy); });
+    if (!lots.length) out += box('⚠ <b>Check ' + esc(ing) + '</b> – no batch number or best before is recorded. Check the label.');
+    else if (noBB.length) out += box('⚠ <b>Check ' + esc(ing) + '</b>' + noBB.map(function (l) { return l.batch ? ' (batch ' + esc(l.batch) + ')' : ''; }).join('') + ' – no best before recorded' + noBB.filter(function (l) { return l.useBy; }).map(function (l) { return ' (only "' + esc(l.useBy) + '" – no year?)'; }).join('') + '. Check the label.');
+  }
+  return out;
 }
 function isDairy(n) { return /milk|cream/i.test(n) && !/powder/i.test(n); }
 function rq(n, q) { return q === '' || q == null || isNaN(Number(q)) ? q : isDairy(n) ? Math.round(Number(q)) : r2(Number(q), 3); }
@@ -539,7 +547,7 @@ ROUTES.batch = function (no) {
   function drawLines() {
     if (!editing) {
       $('#b_lines').innerHTML = '<tr><th>Ingredient</th><th>Amount</th><th>Batch no</th><th>Use by</th></tr>' + lines.filter(function (l) { return l.ingredient; }).map(function (l) {
-        return '<tr><td>' + esc(l.ingredient) + '</td><td>' + esc(l.qty) + ' ' + esc(l.unit) + '</td><td>' + (l.batch ? esc(l.batch) : '<span class="muted">–</span>') + '</td><td>' + (l.useBy ? esc(short(l.useBy)) : '<span class="muted">–</span>') + '</td></tr>';
+        return '<tr><td>' + esc(l.ingredient) + '</td><td>' + esc(l.qty) + ' ' + esc(l.unit) + '</td><td>' + (l.batch ? esc(l.batch) : '<span class="muted">–</span>') + '</td><td>' + (l.useBy ? esc(/^\d{4}-\d{2}-\d{2}$/.test(l.useBy) ? (parse(l.useBy) || new Date()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : l.useBy) : '<span class="muted">–</span>') + '</td></tr>';
       }).join('');
       return;
     }
@@ -614,6 +622,8 @@ ROUTES.batch = function (no) {
     var g = gather();
     if (!g.flavour) return toast('Choose the flavour');
     if (!g.no) return toast('Enter the batch number');
+    var part = (g.lines || []).filter(function (l) { return l.useBy && !/^\d{4}-\d{2}-\d{2}$/.test(String(l.useBy).trim()); });
+    if (part.length && !confirm('These best before dates aren\'t full dates (day, month and year):\n\n' + part.map(function (l) { return '• ' + l.ingredient + ': "' + l.useBy + '"'; }).join('\n') + '\n\nTap OK to save anyway, or Cancel to correct them (write them like 2027-10-20).')) return;
     if (isNew && (D().batches || []).some(function (z) { return String(z.no) === g.no; }) && !confirm('Batch ' + g.no + ' already exists. Save over it?')) return;
     if ((g.large !== '' || g.small !== '' || g.napolis !== '') && !g.tub) g.tub = today();
     var probs = check();
