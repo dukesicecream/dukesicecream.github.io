@@ -1686,7 +1686,8 @@ document.addEventListener('change', function (e) {
     if (!ing || !v) return typedNote(t, '');
     var lk = function (x) { return String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); };
     names = lotsFor(ing).map(function (l) { return String(l.batch || ''); });
-    (D().batches || []).forEach(function (b) { (b.lines || []).forEach(function (l) { if (nameKey(l.ingredient) === nameKey(ing) && l.batch) names.push(String(l.batch)); }); });
+    // a batch record is checked against the deliveries and stock page; those are checked against earlier batch records too
+    if (!t.matches('[data-k=batch]')) (D().batches || []).forEach(function (b) { (b.lines || []).forEach(function (l) { if (nameKey(l.ingredient) === nameKey(ing) && l.batch) names.push(String(l.batch)); }); });
     names = Array.from(new Set(names.filter(Boolean)));
     if (names.some(function (n) { return lk(n) === lk(v); })) return typedNote(t, '');
     hit = names.find(function (n) { var a = lk(n), b = lk(v); return a.length >= 4 && b.length >= 4 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0 || editDist(a, b) <= 2); }) || null;
