@@ -2282,7 +2282,7 @@ function drawHours() {
     '<div class="card noprint"><h2>Add hours</h2><div class="grid3">' +
     field('Date', inp('h_date', today(), 'date')) + field('Who', sel('h_name', people, '', 'Choose…')) +
     field('Start', inp('h_start', '', 'time')) + field('Finish', inp('h_fin', '', 'time')) + field('Break (minutes)', inp('h_brk', '', 'number')) +
-    field('…or total hours', inp('h_hrs', '', 'number')) + '</div>' + field('Notes', inp('h_notes', '')) +
+    field('…or total hours', inp('h_hrs', '', 'number')) + '</div>' + field('Notes', inp('h_notes', '')) + '<div id="h_fl"></div>' +
     '<p class="muted" id="h_calc"></p><button class="btn" id="h_add">Save hours</button> <button class="btn alt" id="h_cancel" style="display:none">Cancel edit</button></div>' +
     (function () { var fl = v.entries.filter(function (e) { return e.flags && e.flags.length; }); return fl.length ? '<div class="due bad"><span>⚠</span><span><b>' + fl.length + ' entr' + (fl.length > 1 ? 'ies' : 'y') + ' to check</b> this month – marked in red below.</span></div>' : ''; })() +
     '<div class="card"><h2>' + esc(monthName) + ' – totals</h2><div class="printonly">Dukes Ultra Premium Ice Cream</div><table class="t"><tr><th>Name</th><th>Hours</th>' + (pay ? '<th>Rate £/hr</th><th>Pay £</th>' : '') + '</tr>' +
@@ -2314,12 +2314,24 @@ function drawHours() {
     $('#h_add').textContent = 'Save changes'; $('#h_cancel').style.display = ''; calc(); window.scrollTo(0, 0); toast('Editing – changes are recorded');
   }; });
   $('#h_cancel').onclick = function () { drawHours(); };
+  // which flavour(s) the day's hours go to – the flavour made that day is ticked, they confirm it or pick others
+  var drawFl = function () {
+    var d = val('h_date'), saved = (v.dayFl || {})[d];
+    var made = Array.from(new Set((D().batches || []).filter(function (b) { return b.date === d || b.tub === d; }).map(function (b) { return b.flavour; }).filter(Boolean)));
+    var on = saved || made, all = Array.from(new Set((D().flavours || []).concat(on)));
+    $('#h_fl').innerHTML = '<div style="background:#fff4d6;border:2px solid #d99a00;border-radius:10px;padding:10px 12px;margin:10px 0">' +
+      (saved ? '<b>Hours on ' + esc(nice(d)) + ' go to:</b> ' + esc(saved.join(', ') || 'no flavour') + ' <span class="small muted">(change the ticks if that\'s wrong)</span>'
+        : made.length ? '<b>Was ' + esc(made.join(' and ')) + ' made on ' + esc(nice(d)) + '?</b> <span class="small">The hours go to the flavour' + (made.length > 1 ? 's' : '') + ' ticked – tick another flavour if more were made, or change it.</span>'
+        : '<b>Was any ice cream made on ' + esc(nice(d)) + '?</b> <span class="small">Tick the flavour(s) so the hours go to them. Leave empty if not.</span>') +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px">' + all.map(function (f) { return '<label style="display:flex;gap:6px;align-items:center;font-size:15px"><input type="checkbox" data-hfl value="' + esc(f) + '"' + (on.indexOf(f) >= 0 ? ' checked' : '') + '> ' + esc(f) + '</label>'; }).join('') + '</div></div>';
+  };
+  drawFl(); $('#h_date').addEventListener('change', drawFl);
   $('#h_add').onclick = function () {
     var opt = $('#h_name').selectedOptions[0], name = val('h_name');
     if (!name || name === '__new') return toast('Choose who');
     if (!(val('h_start') && val('h_fin')) && !num(val('h_hrs'))) return toast('Enter start and finish times, or the total hours');
     var isCasual = (opt && opt.dataset.casual === '1') || v.people.some(function (p) { return p.name === name && p.casual; });
-    hoursDo({ op: 'save', e: { id: S.hEdit || uid(), date: val('h_date'), name: name, start: val('h_start'), finish: val('h_fin'), brk: num(val('h_brk')), hours: num(val('h_hrs')), notes: val('h_notes'), casual: isCasual, rate: opt && opt.dataset.rate || '', by: S.user } }, 'Hours saved for ' + name);
+    hoursDo({ op: 'save', e: { id: S.hEdit || uid(), date: val('h_date'), name: name, start: val('h_start'), finish: val('h_fin'), brk: num(val('h_brk')), hours: num(val('h_hrs')), notes: val('h_notes'), casual: isCasual, rate: opt && opt.dataset.rate || '', by: S.user }, dayFl: { date: val('h_date'), flavours: $$('[data-hfl]').filter(function (c) { return c.checked; }).map(function (c) { return c.value; }) } }, 'Hours saved for ' + name);
   };
   $$('.h_rate').forEach(function (e) { e.onchange = function () { hoursDo({ op: 'rate', name: e.dataset.n, rate: num(e.value) }, 'Rate saved for ' + e.dataset.n); }; });
   $$('[data-del]').forEach(function (b) { b.onclick = function () { if (confirm('Delete this entry?')) hoursDo({ op: 'delete', id: b.dataset.del }, 'Deleted'); }; });
