@@ -1652,6 +1652,38 @@ function ownLoad(title, op, draw, d) {
     .catch(function () { render(back('office', 'Office') + '<h1>' + esc(title) + '</h1><div class="card">No connection.</div>'); });
 }
 
+// "Did you mean …?" – when an ingredient or packaging name is typed that's nearly (not exactly) one already on the list
+function nameKey(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').map(function (w) { return w.length > 3 ? w.replace(/([^s])s$/, '$1') : w; }).join(' '); }
+function editDist(a, b) {
+  var m = a.length, n = b.length, d = []; for (var i = 0; i <= m; i++) { d[i] = [i]; } for (var j = 1; j <= n; j++) d[0][j] = j;
+  for (i = 1; i <= m; i++) for (j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[m][n];
+}
+function closeName(v, names) {
+  v = String(v || '').trim(); if (v.length < 3) return null;
+  if (names.indexOf(v) >= 0) return null;
+  var k = nameKey(v), best = null, bestD = 99;
+  names.forEach(function (n) {
+    var nk = nameKey(n); if (!nk) return;
+    var dd = nk === k ? 0 : editDist(k, nk);
+    if (dd > Math.max(1, Math.floor(Math.max(k.length, nk.length) * 0.25)) && !(k.length >= 5 && nk.length >= 5 && (nk.indexOf(k) === 0 || k.indexOf(nk) === 0))) return;
+    if (dd < bestD) { bestD = dd; best = n; }
+  });
+  return best;
+}
+S.dymNo = {};
+document.addEventListener('change', function (e) {
+  var t = e.target; if (!t || t.tagName !== 'INPUT') return;
+  var pack = t.matches('tr.newpack input[data-k=name]');
+  if (!pack && !t.matches('input[data-k=ingredient], #d_item, #n_name, tr.newing input[data-k=name]')) return;
+  var names = pack ? (D().packItems || []).map(function (i) { return i.item; }) : (D().ingredients || []).map(function (i) { return i.name; });
+  var v = t.value.trim(), hit = closeName(v, names);
+  if (!hit || S.dymNo[v + '|' + hit]) return;
+  if (hit.toLowerCase() === v.toLowerCase() || confirm('Did you mean "' + hit + '"?\n\nTap OK to use "' + hit + '", or Cancel to keep "' + v + '" as a new name.')) {
+    t.value = hit; t.dispatchEvent(new Event('input', { bubbles: true }));
+  } else S.dymNo[v + '|' + hit] = 1;
+}, true);
+
 // Jonny only: each shop's buying – tap a shop for its summary, tap an order date for what was in it
 function shopSumList() {
   if (!isOwner() || !navigator.onLine) { if ($('#shopsums')) $('#shopsums').innerHTML = '<h2>Shops</h2><p class="muted small">Needs the internet.</p>'; return; }
