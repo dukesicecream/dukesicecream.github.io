@@ -1674,18 +1674,26 @@ function closeName(v, names) {
 S.dymNo = {};
 document.addEventListener('change', function (e) {
   var t = e.target; if (!t || t.tagName !== 'INPUT') return;
-  var pack = t.matches('tr.newpack input[data-k=name]'), lot = t.matches('input[data-k=batch][data-i]'), sup = t.matches('#d_sup');
+  var pack = t.matches('tr.newpack input[data-k=name]'), lot = t.matches('input[data-k=batch][data-i], input[data-b], #d_batch'), sup = t.matches('#d_sup');
   if (!pack && !lot && !sup && !t.matches('input[data-k=ingredient], #d_item, #n_name, tr.newing input[data-k=name]')) return;
-  var v = t.value.trim(), names, hit, what = 'name';
+  var v = t.value.trim(), names, hit;
   if (lot) {
-    var tr = t.closest('tr'), ingI = tr && tr.querySelector('input[data-k=ingredient]'), ing = ingI ? ingI.value : '';
+    // which ingredient this batch number belongs to
+    var tr = t.closest('tr'), ing = '';
+    if (t.matches('[data-k=batch]')) { var ingI = tr && tr.querySelector('input[data-k=ingredient]'); ing = ingI ? ingI.value : ''; }
+    else if (t.matches('#d_batch')) ing = (($('#d_item') || {}).value || '').trim() || (($('#d_pick') || {}).value || '');
+    else ing = (t.closest('tr[data-cur]') || { dataset: {} }).dataset.cur || (($('#n_name') || {}).value || '');
+    if (!ing || !v) return typedNote(t, '');
     var lk = function (x) { return String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); };
-    names = lotsFor(ing).map(function (l) { return String(l.batch || ''); }).filter(Boolean); what = 'batch number';
-    if (!v || names.some(function (n) { return lk(n) === lk(v); })) return typedNote(t, '');
+    names = lotsFor(ing).map(function (l) { return String(l.batch || ''); });
+    (D().batches || []).forEach(function (b) { (b.lines || []).forEach(function (l) { if (nameKey(l.ingredient) === nameKey(ing) && l.batch) names.push(String(l.batch)); }); });
+    names = Array.from(new Set(names.filter(Boolean)));
+    if (names.some(function (n) { return lk(n) === lk(v); })) return typedNote(t, '');
     hit = names.find(function (n) { var a = lk(n), b = lk(v); return a.length >= 4 && b.length >= 4 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0 || editDist(a, b) <= 2); }) || null;
-    if (hit && !S.dymNo[v + '|' + hit] && confirm('Did you mean batch number "' + hit + '"?\n\nThat\'s the one recorded for ' + ing + '. Tap OK to use it, or Cancel to keep "' + v + '".')) { t.value = hit; t.dispatchEvent(new Event('input', { bubbles: true })); return typedNote(t, ''); }
+    if (hit && !S.dymNo[v + '|' + hit] && confirm('Did you mean batch number "' + hit + '"?\n\nThat number is already recorded for ' + ing + '. Tap OK to use "' + hit + '", or Cancel to keep "' + v + '".')) { t.value = hit; t.dispatchEvent(new Event('input', { bubbles: true })); return typedNote(t, ''); }
     if (hit) S.dymNo[v + '|' + hit] = 1;
-    return typedNote(t, names.length ? 'This batch number doesn\'t match the ' + ing + ' deliveries or stock. Check it against the label – if it\'s right, Jonny and Paul will be asked to check it.' : 'No batch numbers recorded for ' + ing + ' yet – Jonny and Paul will be asked to check this one.');
+    if (t.matches('#d_batch, [data-b]') && !hit) return typedNote(t, ''); // a new delivery or shelf batch is normal
+    return typedNote(t, (hit ? '"' + v + '" is close to ' + ing + ' batch "' + hit + '" but not the same.' : names.length ? 'This batch number doesn\'t match any ' + ing + ' delivery or stock.' : 'No batch numbers are recorded for ' + ing + ' yet.') + ' Is this a new batch?', 'batch');
   }
   names = pack ? (D().packItems || []).map(function (i) { return i.item; }) : sup ? Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).concat((D().lots || []).map(function (l) { return l.supplier; })).filter(Boolean))) : (D().ingredients || []).map(function (i) { return i.name; });
   if (!v || names.indexOf(v) >= 0) return typedNote(t, '');
@@ -1696,13 +1704,18 @@ document.addEventListener('change', function (e) {
     }
     S.dymNo[v + '|' + hit] = 1;
   }
-  typedNote(t, '"' + v + '" isn\'t on the list' + (hit ? ' (closest: ' + hit + ')' : '') + '. Check the spelling – if it\'s right, it\'ll be added and Jonny and Paul will be asked to check it.');
+  typedNote(t, '"' + v + '" isn\'t on the list' + (hit ? ' (closest: ' + hit + ')' : '') + '. Is this a new ' + (sup ? 'supplier' : 'item') + '?', sup ? 'supplier' : 'item');
 }, true);
-function typedNote(inp, msg) {
+// the yellow note under a box: "isn't on the list – is this new?" with Yes / fix it buttons
+function typedNote(inp, msg, kind) {
   var n = inp.parentNode && inp.parentNode.querySelector('[data-typednote]');
-  if (!msg) { if (n) n.remove(); inp.style.background = ''; return; }
+  if (!msg) { if (n) n.remove(); inp.style.background = ''; delete inp.dataset.newok; return; }
   if (!n) { n = document.createElement('div'); n.setAttribute('data-typednote', ''); n.className = 'small'; n.style.cssText = 'color:#8a5a00;margin-top:4px'; inp.insertAdjacentElement('afterend', n); }
-  n.textContent = '⚠ ' + msg; inp.style.background = '#fff4d6';
+  inp.style.background = '#fff4d6'; delete inp.dataset.newok; n.style.color = '#8a5a00';
+  n.innerHTML = '⚠ ' + esc(msg) + (kind ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><button type="button" class="btn sm" data-tn="yes">Yes – save as a new ' + esc(kind) + '</button><button type="button" class="btn soft sm" data-tn="fix">No – let me fix it</button></div>' : '');
+  if (!kind) return;
+  n.querySelector('[data-tn=yes]').onclick = function () { inp.dataset.newok = '1'; inp.style.background = '#e8f5e9'; n.innerHTML = '✓ OK – it\'ll go in as a new ' + esc(kind) + ' when you save. Jonny and Paul will see it to check.'; n.style.color = '#2e7d32'; };
+  n.querySelector('[data-tn=fix]').onclick = function () { inp.focus(); inp.select(); };
 }
 
 // Jonny only: each shop's buying – tap a shop for its summary, tap an order date for what was in it
