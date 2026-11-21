@@ -279,13 +279,14 @@ ROUTES.home = function () {
   var fsBtn = fs.length ? big('🛡️', 'Food safety checks', fs.length + ' to do: ' + fs.map(function (o) { return o[3]; }).join(' · '), '#fsc', 'Start') : '';
   render('<h1>Hello ' + esc(S.user.split(' ')[0]) + '</h1>' +
     (unsent && !navigator.onLine ? '<div class="due"><span>📶</span><span>' + unsent + ' record' + (unsent > 1 ? 's are' : ' is') + ' saved on this device and will send when there\'s internet.</span></div>' : '') +
-    fsBtn + checksAlert() + xmasAlert() + alerts +
+    fsBtn + prodAlerts() + checksAlert() + xmasAlert() + alerts +
     myMessages().map(function (m) { return '<div class="due" style="background:#eef0f8;border-color:#c9cde3;color:#1c2140"><span>✉️</span><span style="flex:1"><b>' + esc(m.from) + (m.to === 'Everyone' ? ' (to everyone)' : '') + ':</b> ' + esc(m.text) + ' <span class="muted small">' + esc(short(m.remind || m.date)) + '</span></span><button class="btn soft sm" data-seen="' + esc(m.id) + '">✓ Seen</button></div>'; }).join('') +
     todoHtml(due, links) +
     '<div class="tiles" style="margin-top:14px">' + tiles.map(function (t) {
       return '<a class="tile' + (t[4] ? ' dark' : '') + '" href="#' + t[0] + '"><span class="ic">' + t[1] + '</span><span><b>' + esc(t[2]) + '</b><br><small>' + esc(t[3]) + '</small></span></a>';
     }).join('') + '</div>' +
     '<p class="muted center" style="margin-top:28px">Last updated from Google: ' + (D().at ? new Date(D().at).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : 'never') + '</p>');
+  wireProdAlerts();
   $$('[data-seen]').forEach(function (b) { b.onclick = function () { var s = load('dk_seen', []); s.push(b.dataset.seen); save('dk_seen', s.slice(-200)); route(); }; });
   $$('[data-ordered]').forEach(function (b) { b.onclick = function (ev) { ev.preventDefault(); record('ordered', { id: b.dataset.ordered, by: S.user }, 'Marked as ordered'); D().toOrder = (D().toOrder || []).filter(function (o) { return o.id !== b.dataset.ordered; }); save(LS.data, S.data); route(); }; });
 };
@@ -874,6 +875,7 @@ ROUTES.deliveries = function () {
     if (isNewIng && !confirm('"' + item + '" isn\'t on the ingredient list yet. Add it as a new item?')) return;
     var t = num(val('d_temp'));
     if (/milk|cream/i.test(item) && t === '' && !confirm('No temperature entered for a chilled item. Save anyway?')) return;
+    if (!bbOk([{ name: item, bb: val('d_use') }])) return;
     record('delivery', { id: uid(), date: val('d_date'), item: item, category: isNewIng ? val('d_cat') : '', supplier: val('d_sup'), qty: num(val('d_qty')), unit: val('d_unit'), useBy: val('d_use'), temp: t, batch: val('d_batch'), comment: val('d_com'), by: val('d_by') },
       item + ' saved' + (t !== '' && /milk|cream/i.test(item) && t > 5 ? ' – temperature is above 5 °C, Jonny will be told' : ''));
     keepDraft('delivery', { date: val('d_date'), supplier: val('d_sup') });
@@ -1104,6 +1106,7 @@ ROUTES.ingstock = function () {
     tl.querySelector('[data-save]').onclick = function () {
       var q = num(inpt.value); if (q === '') return toast('Put in how much is there');
       var uu = u || td.querySelector('[data-u]').value, lots = readLots(tl);
+      if (!bbOk(lots.map(function (l) { return { name: n + (l.batch ? ' (batch ' + l.batch + ')' : ''), bb: l.bb }; }))) return;
       record('ingStock', { id: uid(), date: today(), by: S.user, counts: [{ ingredient: n, qty: q, unit: uu, lots: lots }] }, n + ' updated');
       now[n] = Object.assign({}, x, { est: q, counted: today(), unit: uu });
       D().stockLots = D().stockLots || {}; if (lots.length) D().stockLots[n] = { date: today(), lots: lots }; else delete D().stockLots[n];
@@ -1121,6 +1124,7 @@ ROUTES.ingstock = function () {
     if ((D().ingredients || []).some(function (i) { return i.name.toLowerCase() === name.toLowerCase(); })) return toast(name + ' is already on the list – use its Edit button');
     if (q === '') return toast('Put in how much is there');
     var lots = readLots($('#n_lots'));
+    if (!bbOk(lots.map(function (l) { return { name: name + (l.batch ? ' (batch ' + l.batch + ')' : ''), bb: l.bb }; }))) return;
     record('ingStock', { id: uid(), date: today(), by: S.user, counts: [{ ingredient: name, qty: q, unit: uu, category: cat, supplier: val('n_sup'), lots: lots }] }, name + ' added');
     (D().ingredients = D().ingredients || []).push({ name: name, unit: uu, category: cat, supplier: val('n_sup'), track: true });
     (D().ingNow = D().ingNow || []).push({ name: name, unit: uu, est: q, counted: today() });
@@ -1935,6 +1939,42 @@ function invoiceLots(text) {
 }
 /* ---------- Christmas pre-orders (staff see orders, Jonny also sees money and settings) ---------- */
 // home page warning when Christmas orders need more big tubs than will be in stock on collection day
+// best before sanity check when it's typed in (deliveries and the stock page): needs a full date with the year,
+// and flags one that's already passed or is more than 5 years away (usually the wrong year)
+function bbOk(list) {
+  var t = today(), far = addDays(t, 5 * 365), bad = [];
+  list.forEach(function (x) {
+    var v = String(x.bb || '').trim(); if (!v) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) bad.push('• ' + x.name + ': "' + v + '" isn\'t a full date (day, month and year)');
+    else if (v < t) bad.push('• ' + x.name + ': ' + nice(v) + ' has already passed');
+    else if (v > far) bad.push('• ' + x.name + ': ' + nice(v) + ' is more than 5 years away – is the year right?');
+  });
+  return !bad.length || confirm('Please check the best before date' + (bad.length > 1 ? 's' : '') + ':\n\n' + bad.join('\n') + '\n\nTap OK to save anyway, or Cancel to correct it.');
+}
+// home screen (Jonny and Paul): staff hours still to enter after a production day, and tub counts to confirm
+function prodAlerts() {
+  if (!(isOwner() || S.user === manager())) return '';
+  var out = '', hd = D().hoursDue || [], te = D().tubEst || [];
+  if (hd.length) out += '<a href="#hours" style="display:flex;gap:10px;background:#e8f0fe;border:2px solid #1c2140;color:#1c2140;text-decoration:none;border-radius:12px;padding:12px 14px;margin-bottom:12px"><span style="font-size:22px">⏱️</span><span><b>Enter the staff hours</b><br><span class="small">Production on ' + hd.map(function (d) { return esc(nice(d)); }).join(', ') + ' – no hours entered yet.</span></span></a>';
+  te.forEach(function (x) {
+    if (x.noBefore) { out += '<div style="background:#fff4d6;border:2px solid #d99a00;border-radius:12px;padding:12px 14px;margin-bottom:12px"><b>🍦 Batch ' + esc(x.no) + ' ' + esc(x.flavour) + ' – no tub count entered</b><br>' +
+      '<span class="small">The stock take on ' + esc(short(x.to)) + ' shows ' + x.small + ' small and ' + x.large + ' big ' + esc(x.flavour) + ' in total, but there\'s no earlier stock take to compare with, so this batch\'s share can\'t be worked out. Please enter the count.</span>' +
+      '<div style="margin-top:8px"><a class="btn sm" href="#batch/' + encodeURIComponent(x.no) + '">Enter the tub count</a></div></div>'; return; }
+    out += '<div data-te="' + esc(x.no) + '" style="background:#fff4d6;border:2px solid #d99a00;border-radius:12px;padding:12px 14px;margin-bottom:12px"><b>🍦 Batch ' + esc(x.no) + ' ' + esc(x.flavour) + ' – no tub count entered</b><br>' +
+      '<span class="small">From the stock takes (' + esc(short(x.from)) + ' → ' + esc(short(x.to)) + '), about <b>' + x.small + ' small</b>, <b>' + x.large + ' big</b>' + (x.napolis ? ' and <b>' + x.napolis + ' Napolis</b>' : '') + ' were made. Does that look right?</span>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn sm" type="button" data-teok="' + esc(x.no) + '">Yes – save these</button><a class="btn soft sm" href="#batch/' + encodeURIComponent(x.no) + '">No – enter the count</a></div></div>';
+  });
+  return out;
+}
+function wireProdAlerts() {
+  $$('[data-teok]').forEach(function (b) { b.onclick = function () {
+    var x = (D().tubEst || []).find(function (y) { return y.no === b.dataset.teok; }); if (!x) return;
+    record('tubCount', { no: x.no, large: x.large, small: x.small, napolis: x.napolis, from: x.from, to: x.to }, 'Batch ' + x.no + ' tub count saved');
+    D().tubEst = D().tubEst.filter(function (y) { return y !== x; });
+    var bb = (D().batches || []).find(function (y) { return String(y.no) === x.no; }); if (bb) { bb.large = x.large; bb.small = x.small; bb.napolis = x.napolis; if (!bb.tub) bb.tub = bb.date; }
+    save(LS.data, S.data); b.closest('[data-te]').remove();
+  }; });
+}
 // entries typed that don't match the lists – only Jonny and Paul see these
 function checksAlert() {
   if (!(isOwner() || S.user === manager())) return '';
