@@ -320,8 +320,20 @@ function lotsFor(name) {
   // batches entered on the stock page come first (they're what's already on the shelf), then deliveries
   var st = null; Object.keys(D().stockLots || {}).forEach(function (k) { if (k.toLowerCase() === n) st = D().stockLots[k]; });
   var shelf = ((st && st.lots) || []).map(function (l, i) { return { id: 'stock' + i, date: st.date, item: name, batch: l.batch || '', useBy: l.bb || '', status: 'Open', stock: true }; });
-  return shelf.concat((D().lots || []).filter(function (l) { return l.status !== 'Finished' && String(l.item || '').toLowerCase() === n; })
-    .sort(function (a, b) { return a.date < b.date ? -1 : 1; }));
+  var all = shelf.concat((D().lots || []).filter(function (l) { return l.status !== 'Finished' && String(l.item || '').toLowerCase() === n; }));
+  // the same batch number entered twice (stock page + delivery) only counts once
+  var seen = {}; all = all.filter(function (l) { var k = String(l.batch || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!k) return true; if (seen[k]) return false; seen[k] = 1; return true; });
+  // oldest best before / use by first (no date last), then what's on the shelf, then oldest delivery
+  var bb = function (l) { return /^\d{4}-\d{2}-\d{2}$/.test(l.useBy || '') ? l.useBy : '9999'; };
+  return all.sort(function (a, b) { return bb(a) !== bb(b) ? (bb(a) < bb(b) ? -1 : 1) : (a.stock !== b.stock ? (a.stock ? -1 : 1) : (a.date < b.date ? -1 : 1)); });
+}
+// on the recipe: when there's more than one batch of an ingredient, which to use first
+function useFirst(ing) {
+  var lots = lotsFor(ing); if (lots.length < 2) return '';
+  var d = function (x) { var p = parse(x); return p ? p.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : ''; };
+  return '<tr><td colspan="3" style="padding:0 6px 8px"><div style="background:#fdecea;border-left:4px solid #b3261e;border-radius:6px;padding:6px 8px;font-size:14px">⚠ <b>Use the oldest first:</b> ' +
+    lots.map(function (l, i) { var t = (l.batch ? 'batch ' + esc(l.batch) : 'no batch no.') + (l.useBy && d(l.useBy) ? ' (BB ' + esc(d(l.useBy)) + ')' : l.date ? ' (in ' + esc(d(l.date)) + ')' : ''); return i === 0 ? '<b style="color:#b3261e">1st ' + t + '</b>' : (i + 1) + (i === 1 ? 'nd' : i === 2 ? 'rd' : 'th') + ' ' + t; }).join(' → ') +
+    '<br><span class="small muted">Use all of the first one before opening the next – it\'s fine if it\'s all used up.</span></div></td></tr>';
 }
 function isDairy(n) { return /milk|cream/i.test(n) && !/powder/i.test(n); }
 function rq(n, q) { return q === '' || q == null || isNaN(Number(q)) ? q : isDairy(n) ? Math.round(Number(q)) : r2(Number(q), 3); }
@@ -424,7 +436,7 @@ function recipeCard(flavour, mix) {
   var baseNames = base.map(function (r) { return String(r.ingredient).toLowerCase(); });
   var line = function (r, extra) {
     var q = r.amount / perOf(r) * m, p = packText(r.ingredient, q, r.unit);
-    return '<tr' + (extra ? ' style="background:#fff4c2"' : '') + '><td style="padding:8px 6px"><b>' + esc(r.ingredient) + '</b>' + (extra ? ' <span class="pill warn">EXTRA – on top of the base mix</span>' : '') + '</td><td style="padding:8px 6px;font-size:18px;white-space:nowrap"><b>' + esc(p.main) + '</b></td><td style="padding:8px 6px">' + esc(p.packs) + '</td></tr>';
+    return '<tr' + (extra ? ' style="background:#fff4c2"' : '') + '><td style="padding:8px 6px"><b>' + esc(r.ingredient) + '</b>' + (extra ? ' <span class="pill warn">EXTRA – on top of the base mix</span>' : '') + '</td><td style="padding:8px 6px;font-size:18px;white-space:nowrap"><b>' + esc(p.main) + '</b></td><td style="padding:8px 6px">' + esc(p.packs) + '</td></tr>' + useFirst(r.ingredient);
   };
   var info = (D().flavourInfo || []).find(function (x) { return x.name === flavour; }) || {};
   var sorted = function (a) { return a.slice().sort(function (x, y) { return inBase(y.amount / perOf(y), y.unit) - inBase(x.amount / perOf(x), x.unit); }); };
