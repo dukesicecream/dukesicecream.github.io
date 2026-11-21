@@ -279,7 +279,7 @@ ROUTES.home = function () {
   var fsBtn = fs.length ? big('🛡️', 'Food safety checks', fs.length + ' to do: ' + fs.map(function (o) { return o[3]; }).join(' · '), '#fsc', 'Start') : '';
   render('<h1>Hello ' + esc(S.user.split(' ')[0]) + '</h1>' +
     (unsent && !navigator.onLine ? '<div class="due"><span>📶</span><span>' + unsent + ' record' + (unsent > 1 ? 's are' : ' is') + ' saved on this device and will send when there\'s internet.</span></div>' : '') +
-    fsBtn + xmasAlert() + alerts +
+    fsBtn + checksAlert() + xmasAlert() + alerts +
     myMessages().map(function (m) { return '<div class="due" style="background:#eef0f8;border-color:#c9cde3;color:#1c2140"><span>✉️</span><span style="flex:1"><b>' + esc(m.from) + (m.to === 'Everyone' ? ' (to everyone)' : '') + ':</b> ' + esc(m.text) + ' <span class="muted small">' + esc(short(m.remind || m.date)) + '</span></span><button class="btn soft sm" data-seen="' + esc(m.id) + '">✓ Seen</button></div>'; }).join('') +
     todoHtml(due, links) +
     '<div class="tiles" style="margin-top:14px">' + tiles.map(function (t) {
@@ -1674,15 +1674,36 @@ function closeName(v, names) {
 S.dymNo = {};
 document.addEventListener('change', function (e) {
   var t = e.target; if (!t || t.tagName !== 'INPUT') return;
-  var pack = t.matches('tr.newpack input[data-k=name]');
-  if (!pack && !t.matches('input[data-k=ingredient], #d_item, #n_name, tr.newing input[data-k=name]')) return;
-  var names = pack ? (D().packItems || []).map(function (i) { return i.item; }) : (D().ingredients || []).map(function (i) { return i.name; });
-  var v = t.value.trim(), hit = closeName(v, names);
-  if (!hit || S.dymNo[v + '|' + hit]) return;
-  if (hit.toLowerCase() === v.toLowerCase() || confirm('Did you mean "' + hit + '"?\n\nTap OK to use "' + hit + '", or Cancel to keep "' + v + '" as a new name.')) {
-    t.value = hit; t.dispatchEvent(new Event('input', { bubbles: true }));
-  } else S.dymNo[v + '|' + hit] = 1;
+  var pack = t.matches('tr.newpack input[data-k=name]'), lot = t.matches('input[data-k=batch][data-i]'), sup = t.matches('#d_sup');
+  if (!pack && !lot && !sup && !t.matches('input[data-k=ingredient], #d_item, #n_name, tr.newing input[data-k=name]')) return;
+  var v = t.value.trim(), names, hit, what = 'name';
+  if (lot) {
+    var tr = t.closest('tr'), ingI = tr && tr.querySelector('input[data-k=ingredient]'), ing = ingI ? ingI.value : '';
+    var lk = function (x) { return String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); };
+    names = lotsFor(ing).map(function (l) { return String(l.batch || ''); }).filter(Boolean); what = 'batch number';
+    if (!v || names.some(function (n) { return lk(n) === lk(v); })) return typedNote(t, '');
+    hit = names.find(function (n) { var a = lk(n), b = lk(v); return a.length >= 4 && b.length >= 4 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0 || editDist(a, b) <= 2); }) || null;
+    if (hit && !S.dymNo[v + '|' + hit] && confirm('Did you mean batch number "' + hit + '"?\n\nThat\'s the one recorded for ' + ing + '. Tap OK to use it, or Cancel to keep "' + v + '".')) { t.value = hit; t.dispatchEvent(new Event('input', { bubbles: true })); return typedNote(t, ''); }
+    if (hit) S.dymNo[v + '|' + hit] = 1;
+    return typedNote(t, names.length ? 'This batch number doesn\'t match the ' + ing + ' deliveries or stock. Check it against the label – if it\'s right, Jonny and Paul will be asked to check it.' : 'No batch numbers recorded for ' + ing + ' yet – Jonny and Paul will be asked to check this one.');
+  }
+  names = pack ? (D().packItems || []).map(function (i) { return i.item; }) : sup ? Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).concat((D().lots || []).map(function (l) { return l.supplier; })).filter(Boolean))) : (D().ingredients || []).map(function (i) { return i.name; });
+  if (!v || names.indexOf(v) >= 0) return typedNote(t, '');
+  hit = closeName(v, names);
+  if (hit && !S.dymNo[v + '|' + hit]) {
+    if (hit.toLowerCase() === v.toLowerCase() || confirm('Did you mean "' + hit + '"?\n\nTap OK to use "' + hit + '", or Cancel to keep "' + v + '" as a new ' + (sup ? 'supplier' : 'name') + '.')) {
+      t.value = hit; t.dispatchEvent(new Event('input', { bubbles: true })); return typedNote(t, '');
+    }
+    S.dymNo[v + '|' + hit] = 1;
+  }
+  typedNote(t, '"' + v + '" isn\'t on the list' + (hit ? ' (closest: ' + hit + ')' : '') + '. Check the spelling – if it\'s right, it\'ll be added and Jonny and Paul will be asked to check it.');
 }, true);
+function typedNote(inp, msg) {
+  var n = inp.parentNode && inp.parentNode.querySelector('[data-typednote]');
+  if (!msg) { if (n) n.remove(); inp.style.background = ''; return; }
+  if (!n) { n = document.createElement('div'); n.setAttribute('data-typednote', ''); n.className = 'small'; n.style.cssText = 'color:#8a5a00;margin-top:4px'; inp.insertAdjacentElement('afterend', n); }
+  n.textContent = '⚠ ' + msg; inp.style.background = '#fff4d6';
+}
 
 // Jonny only: each shop's buying – tap a shop for its summary, tap an order date for what was in it
 function shopSumList() {
@@ -1878,6 +1899,27 @@ function invoiceLots(text) {
 }
 /* ---------- Christmas pre-orders (staff see orders, Jonny also sees money and settings) ---------- */
 // home page warning when Christmas orders need more big tubs than will be in stock on collection day
+// entries typed that don't match the lists – only Jonny and Paul see these
+function checksAlert() {
+  if (!(isOwner() || S.user === manager())) return '';
+  var c = D().checks || []; if (!c.length) return '';
+  return '<a href="#checks" style="display:flex;gap:10px;background:#fff4d6;border:2px solid #d99a00;color:#5a3d00;text-decoration:none;border-radius:12px;padding:12px 14px;margin-bottom:12px"><span style="font-size:22px">⚠️</span><span><b>' + c.length + ' entr' + (c.length === 1 ? 'y' : 'ies') + ' to check</b><br><span class="small">Names or batch numbers typed that don\'t match the lists. Tap to check.</span></span></a>';
+}
+ROUTES.checks = function () {
+  if (!(isOwner() || S.user === manager())) return ROUTES.home();
+  var c = D().checks || [];
+  render(back() + '<h1>Entries to check</h1><p class="muted">These were typed in and didn\'t match anything on the lists. If one is wrong, correct it where it was entered (or on the Google Sheet), then tap <b>Done</b>. If it\'s right, just tap <b>Done</b>.</p>' +
+    (c.length ? c.map(function (x, i) {
+      return '<div class="card" data-ck="' + i + '"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><b>' + esc(x.where) + '</b><br>Typed: <b style="color:#b3261e">' + esc(x.typed) + '</b>' +
+        (x.closest ? '<br>Closest on the list: <b>' + esc(x.closest) + '</b>' : '') + '<br><span class="small muted">' + esc(x.by) + ' · ' + esc(short(x.date)) + '</span></div>' +
+        '<button class="btn soft sm" type="button" data-ckdone="' + i + '">Done</button></div></div>';
+    }).join('') : '<div class="card"><p class="muted">Nothing to check.</p></div>'));
+  $$('[data-ckdone]').forEach(function (b) { b.onclick = function () {
+    var x = c[b.dataset.ckdone]; record('checkDone', { key: x.key }, 'Marked as checked');
+    D().checks = (D().checks || []).filter(function (y) { return y.key !== x.key; }); save(LS.data, S.data);
+    b.closest('.card').remove();
+  }; });
+};
 function xmasAlert() {
   var x = D().xmas, bad = x && (x.flavours || []).filter(function (f) { return f.short > 0 || f.risk; });
   if (!bad || !bad.length) return '';
