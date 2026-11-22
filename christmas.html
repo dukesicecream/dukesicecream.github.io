@@ -82,13 +82,19 @@
     <div id="cancelled" class="note hide">Your payment wasn't completed, so your order isn't confirmed yet. You can try again below.</div>
     <div class="card">
       <div id="intro" class="small" style="margin-bottom:12px"></div>
-      <div class="info"><span class="ic">🍦</span><div><b>Big tubs (500 ml)</b> – <span id="price"></span> each<br><span class="muted small">Minimum order <span id="min"></span> tubs – mix and match any flavours</span></div></div>
+      <div class="info"><span class="ic">🍦</span><div><b>Big tubs (500 ml)</b> – <span id="price"></span><br><span class="muted small">Minimum order <span id="min"></span> tubs – mix and match any flavours</span></div></div>
       <div class="info" style="margin-top:10px"><span class="ic">🎁</span><div><b>Collection</b><br><span id="collection" class="muted"></span></div></div>
       <div class="info hide" id="dlrow" style="margin-top:10px"><span class="ic">⏰</span><div><b>Order by</b> <span id="deadline"></span></div></div>
     </div>
 
+    <div class="card hide" id="festcard">
+      <h2>🎄 Dukes'mas Flavours</h2>
+      <p class="small muted" style="margin:0 0 6px">Our festive flavours – only at Christmas</p>
+      <div id="festive"></div>
+    </div>
+
     <div class="card">
-      <h2>Choose your flavours</h2>
+      <h2 id="flhead">Choose your flavours</h2>
       <div id="flavours"></div>
     </div>
 
@@ -113,7 +119,7 @@
 <script>
 (function () {
   var API = 'https://script.google.com/macros/s/AKfycbxcD25Bdz6Fxp2HMXvTZvDrPdgKXhX8TCnLVuo6fsYE0afOHNvqRk65b0YCS-s5YIp0/exec';
-  var q = new URLSearchParams(location.search), preview = q.has('preview'), info = null, qty = {};
+  var q = new URLSearchParams(location.search), preview = q.has('preview'), info = null, qty = {}, PR = {};
   var $ = function (s) { return document.querySelector(s); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
   var gbp = function (n) { return '£' + Number(n || 0).toFixed(2); };
@@ -135,23 +141,32 @@
   function totals() {
     var n = 0; Object.keys(qty).forEach(function (k) { n += qty[k] || 0; });
     $('#count').textContent = n ? n + ' big tub' + (n === 1 ? '' : 's') : 'No tubs yet';
-    $('#total').textContent = gbp(n * info.price);
+    var money = 0; Object.keys(qty).forEach(function (k) { money += (qty[k] || 0) * (PR[k] != null ? PR[k] : info.price); });
+    $('#total').textContent = gbp(money);
     var m = info.min || 1;
     $('#go').disabled = n < m;
     if (n && n < m) $('#count').textContent = n + ' of ' + m + ' tubs – add ' + (m - n) + ' more';
     return n;
   }
   function draw() {
-    $('#price').textContent = gbp(info.price); $('#min').textContent = info.min || 1;
+    $('#price').textContent = gbp(info.price) + ' each'; $('#min').textContent = info.min || 1;
     $('#collection').textContent = info.collection || 'Collection day and time to be confirmed';
     if (info.deadline) { $('#deadline').textContent = info.deadline; show('#dlrow', true); }
     $('#intro').innerHTML = esc(info.intro).replace(/\n/g, '<br>');
-    $('#flavours').innerHTML = info.flavours.map(function (f, i) {
-      return '<div class="fl" data-i="' + i + '"><span class="n">' + esc(f) + '</span><span class="qty"><button type="button" data-m="-1" aria-label="One less ' + esc(f) + '">−</button>' +
+    // Dukes'mas flavours first (their own price), then the usual flavours
+    var fest = info.festive || [], all = fest.map(function (x) { return x.name; }).concat(info.flavours);
+    fest.forEach(function (x) { PR[x.name] = Number(x.price); });
+    var dp = fest.length && fest.every(function (x) { return Number(x.price) === Number(fest[0].price); }) ? Number(fest[0].price) : null;
+    if (fest.length) { $('#price').textContent = gbp(info.price) + (dp !== null && dp !== info.price ? ' each, Dukes\'mas flavours ' + gbp(dp) : ' each'); $('#flhead').textContent = 'Our flavours'; }
+    show('#festcard', fest.length > 0);
+    var row = function (f, i) {
+      return '<div class="fl" data-i="' + i + '"><span class="n">' + esc(f) + (PR[f] != null ? '<br><span class="small muted">' + gbp(PR[f]) + ' a tub</span>' : '') + '</span><span class="qty"><button type="button" data-m="-1" aria-label="One less ' + esc(f) + '">−</button>' +
         '<input type="number" inputmode="numeric" min="0" max="50" value="0" aria-label="How many ' + esc(f) + '"><button type="button" data-m="1" aria-label="One more ' + esc(f) + '">+</button></span></div>';
-    }).join('');
+    };
+    $('#festive').innerHTML = fest.map(function (x, i) { return row(x.name, i); }).join('');
+    $('#flavours').innerHTML = info.flavours.map(function (f, i) { return row(f, i + fest.length); }).join('');
     Array.prototype.forEach.call(document.querySelectorAll('.fl'), function (row) {
-      var f = info.flavours[Number(row.dataset.i)], inp = row.querySelector('input');
+      var f = all[Number(row.dataset.i)], inp = row.querySelector('input');
       var set = function (v) { v = Math.max(0, Math.min(50, Math.floor(Number(v) || 0))); qty[f] = v; inp.value = v; row.classList.toggle('on', v > 0); totals(); };
       Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) { b.onclick = function () { set((qty[f] || 0) + Number(b.dataset.m)); }; });
       inp.oninput = function () { set(inp.value); };
