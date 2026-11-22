@@ -1176,6 +1176,7 @@ ROUTES.ingstock = function () {
     var counts = $$('tr[data-ing]').map(function (tr) { return Object.assign({ ingredient: tr.dataset.ing }, read(tr)); }).filter(function (c) { return c.qty !== ''; });
     $$('tr.newing').forEach(function (tr) { var n = tr.querySelector('[data-k=name]').value.trim(); if (n) { var c = read(tr); if (c.qty === '') { c.qty = 0; c.packs = 0; c.unit = c.packSize ? c.sizeUnit : 'each'; } counts.push(Object.assign({ ingredient: n, supplier: tr.querySelector('[data-k=sup]').value.trim(), category: tr.querySelector('[data-k=cat]').value }, c)); } });
     if (!counts.length) return toast('Nothing counted yet');
+    if (!packOk(counts.filter(function (c) { return c.packSize !== '' && c.packSize != null; }).map(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }) || {}; return { name: c.ingredient, packSize: c.packSize, packUnit: c.sizeUnit, unit: g.unit }; }))) return;
     var notC = $$('tr[data-ing]').length - counts.filter(function (c) { return !c.supplier && c.category === undefined; }).length;
     counts.forEach(function (c) { var g = (D().ingredients || []).find(function (i) { return i.name === c.ingredient; }); if (g) { if (c.packType) g.packType = c.packType; if (c.packSize !== '') g.packSize = c.packSize; if (c.packSize !== '') g.countUnit = c.sizeUnit; } });
     record('ingStock', { id: uid(), date: val('i_date'), by: val('i_by') || S.user, counts: counts }, 'Count saved' + (notC > 0 ? ' – ' + notC + ' item' + (notC > 1 ? 's' : '') + ' not counted' : ''));
@@ -1724,7 +1725,7 @@ document.addEventListener('change', function (e) {
     if (hit && !S.dymNo[v + '|' + hit] && confirm('Did you mean batch number "' + hit + '"?\n\nThat number is already recorded for ' + ing + '. Tap OK to use "' + hit + '", or Cancel to keep "' + v + '".')) { t.value = hit; t.dispatchEvent(new Event('input', { bubbles: true })); return typedNote(t, ''); }
     if (hit) S.dymNo[v + '|' + hit] = 1;
     if (t.matches('#d_batch, [data-b]') && !hit) return typedNote(t, ''); // a new delivery or shelf batch is normal
-    return typedNote(t, (hit ? '"' + v + '" is close to ' + ing + ' batch "' + hit + '" but not the same.' : names.length ? 'This batch number doesn\'t match any ' + ing + ' delivery or stock.' : 'No batch numbers are recorded for ' + ing + ' yet.') + ' Is this a new batch?', 'batch');
+    return typedNote(t, (hit ? '"' + v + '" is close to ' + ing + ' batch "' + hit + '" but not the same.' : names.length ? 'This batch number isn\'t in the ' + ing + ' deliveries or stock.' : 'No batch numbers are recorded for ' + ing + ' in deliveries or stock yet.') + ' Would you like it added to deliveries (and so to stock)?', 'batch');
   }
   names = pack ? (D().packItems || []).map(function (i) { return i.item; }) : sup ? Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).concat((D().lots || []).map(function (l) { return l.supplier; })).filter(Boolean))) : (D().ingredients || []).map(function (i) { return i.name; });
   if (!v || names.indexOf(v) >= 0) return typedNote(t, '');
@@ -1737,14 +1738,107 @@ document.addEventListener('change', function (e) {
   }
   typedNote(t, '"' + v + '" isn\'t on the list' + (hit ? ' (closest: ' + hit + ')' : '') + '. Is this a new ' + (sup ? 'supplier' : 'item') + '?', sup ? 'supplier' : 'item');
 }, true);
+// Pop-up from a batch record: an ingredient batch that isn't in deliveries or stock is added as a delivery
+// (batch number and best before already filled in – just the delivery date and how much came)
+function addDeliveryPopup(x, done) {
+  var ing = (D().ingredients || []).find(function (i) { return nameKey(i.name) === nameKey(x.item); }) || {};
+  var last = (D().lots || []).filter(function (l) { return nameKey(l.item) === nameKey(x.item); }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).pop() || {};
+  var sups = Array.from(new Set((D().ingredients || []).map(function (i) { return i.supplier; }).concat((D().lots || []).map(function (l) { return l.supplier; })).filter(Boolean))).sort();
+  var chilled = /milk|cream|butter|yog|chill/i.test(x.item + ' ' + (ing.category || '')) && !/powder/i.test(x.item);
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 12px';
+  ov.innerHTML = '<div class="card" style="max-width:460px;width:100%;margin:0"><h2>Add to deliveries</h2><p class="small muted">' + esc(x.item) + ' – this puts the batch into deliveries, so it shows in stock and the food safety records.</p>' +
+    field('Batch number', '<input id="ad_batch" value="' + esc(x.batch) + '">') +
+    field('Best before', '<input id="ad_use" type="date" value="' + esc(/^\d{4}-\d{2}-\d{2}$/.test(x.useBy || '') ? x.useBy : '') + '">') +
+    field('Delivery date', '<input id="ad_date" type="date" max="' + today() + '">') +
+    field('Supplier', '<input id="ad_sup" value="' + esc(last.supplier || ing.supplier || '') + '" list="dl_adsup"><datalist id="dl_adsup">' + sups.map(function (q) { return '<option value="' + esc(q) + '">'; }).join('') + '</datalist>') +
+    '<div class="grid2">' + field('How much was delivered', '<input id="ad_qty" inputmode="decimal"' + (last.qty !== '' && last.qty != null ? ' placeholder="last time ' + esc(last.qty) + '"' : '') + '>') + field('Unit', '<input id="ad_unit" value="' + esc(last.unit || ing.unit || x.unit || '') + '">') + '</div>' +
+    (chilled ? field('Temperature on arrival °C', '<input id="ad_temp" inputmode="decimal">') : '') +
+    '<div class="bar" style="position:static;margin-top:10px"><button class="btn soft" type="button" id="ad_x">Cancel</button><button class="btn" type="button" id="ad_ok">Add delivery</button></div></div>';
+  document.body.appendChild(ov);
+  var q = function (id) { var e = ov.querySelector('#' + id); return e ? e.value.trim() : ''; };
+  ov.querySelector('#ad_x').onclick = function () { ov.remove(); };
+  ov.querySelector('#ad_date').focus();
+  ov.querySelector('#ad_ok').onclick = function () {
+    if (!q('ad_date')) return toast('Put in the delivery date');
+    if (!q('ad_batch')) return toast('Put in the batch number');
+    if (!bbOk([{ name: x.item, bb: q('ad_use') }])) return;
+    var d = { id: uid(), date: q('ad_date'), item: ing.name || x.item, category: '', supplier: q('ad_sup'), qty: num(q('ad_qty')), unit: q('ad_unit'), useBy: q('ad_use'), temp: num(q('ad_temp')), batch: q('ad_batch'), comment: 'Added from a batch record', by: S.user };
+    record('delivery', d, x.item + ' added to deliveries');
+    ov.remove(); if (done) done(d);
+  };
+}
+// a pack size or price that looks wrong (5 g of salt, 759 bottles in a pack) – asked before saving
+function packOk(list) {
+  var bad = [];
+  list.forEach(function (x) {
+    var ps = Number(x.packSize) || 0, pu = String(x.packUnit || x.unit || '').toLowerCase(), u = String(x.unit || '').toLowerCase(), pr = Number(x.price) || 0;
+    if (ps) {
+      if ((pu === 'g' || pu === 'ml') && ps < 50) bad.push('• ' + x.name + ': a pack of ' + ps + ' ' + pu + ' looks very small – should it be ' + ps + ' ' + (pu === 'g' ? 'kg' : 'L') + '?');
+      else if ((pu === 'kg' || pu === 'l') && ps > 200) bad.push('• ' + x.name + ': a pack of ' + ps + ' ' + pu + ' looks very big – should it be ' + ps + ' ' + (pu === 'kg' ? 'g' : 'ml') + '?');
+      else if (!/^(kg|g|l|ml)$/.test(pu) && ps > 200) bad.push('• ' + x.name + ': ' + ps + ' ' + pu + ' in one pack looks too many');
+    }
+    if (pr > 0 && !/water/i.test(x.name)) {
+      var perKL = u === 'g' || u === 'ml' ? pr * 1000 : u === 'kg' || u === 'l' ? pr : null;
+      if (perKL != null && perKL > 150) bad.push('• ' + x.name + ': £' + (Math.round(perKL * 100) / 100) + ' per ' + (u === 'g' || u === 'kg' ? 'kg' : 'litre') + ' looks high');
+      if (perKL != null && perKL < 0.05 || perKL == null && pr < 0.01) bad.push('• ' + x.name + ': £' + pr + ' per ' + (u || 'unit') + ' looks too low');
+    }
+  });
+  return !bad.length || confirm('Please check:\n\n' + bad.join('\n') + '\n\nTap OK to save anyway, or Cancel to correct it.');
+}
+
+// Type-ahead: start typing an ingredient, supplier or batch number and a list of matches drops down, getting shorter
+// with every letter. Tap one to use it. If nothing matches (a new product) the list disappears.
+(function () {
+  var box = null, cur = null;
+  function hide() { if (box) box.style.display = 'none'; cur = null; }
+  function opts(inp) { var dl = document.getElementById(inp.dataset.list || ''); return dl ? Array.prototype.map.call(dl.options, function (o) { return { v: o.value, l: o.label && o.label !== o.value ? o.label : (o.textContent || '').trim() }; }).filter(function (o) { return o.v; }) : []; }
+  function show(inp, all) {
+    var v = inp.value.trim().toLowerCase(), list = opts(inp);
+    var m = all && !v ? list : list.filter(function (o) { var t = o.v.toLowerCase(); return v && t !== v && (t.indexOf(v) === 0 || t.split(/[\s\-–(]+/).some(function (w) { return w.indexOf(v) === 0; }) || (v.length >= 3 && t.indexOf(v) >= 0)); })
+      .sort(function (a, b) { return (a.v.toLowerCase().indexOf(v) === 0 ? 0 : 1) - (b.v.toLowerCase().indexOf(v) === 0 ? 0 : 1) || (a.v < b.v ? -1 : 1); });
+    if (!m.length) return hide();
+    if (!box) { box = document.createElement('div'); box.setAttribute('data-ta', ''); box.style.cssText = 'position:absolute;z-index:10000;background:#fff;border:1px solid #c8cbd6;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.18);max-height:260px;overflow:auto;font-size:16px'; document.body.appendChild(box); }
+    cur = inp;
+    box.innerHTML = m.slice(0, 12).map(function (o, i) { return '<div data-v="' + i + '" style="padding:11px 14px;border-bottom:1px solid #eee;cursor:pointer"><b>' + esc(o.v) + '</b>' + (o.l ? ' <span class="small muted">' + esc(o.l) + '</span>' : '') + '</div>'; }).join('');
+    var r = inp.getBoundingClientRect();
+    box.style.left = (r.left + window.scrollX) + 'px'; box.style.top = (r.bottom + window.scrollY + 2) + 'px'; box.style.minWidth = Math.max(r.width, 200) + 'px'; box.style.display = '';
+    Array.prototype.forEach.call(box.children, function (d) {
+      var pick = function (e) { e.preventDefault(); var o = m[Number(d.dataset.v)]; inp.value = o.v; hide(); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true })); };
+      d.addEventListener('mousedown', pick); d.addEventListener('touchstart', function (e) { d.dataset.t = '1'; }, { passive: true }); d.addEventListener('touchmove', function () { delete d.dataset.t; }, { passive: true }); d.addEventListener('touchend', function (e) { if (d.dataset.t) pick(e); });
+    });
+  }
+  document.addEventListener('focusin', function (e) { try {
+    var t = e.target; if (!t || t.tagName !== 'INPUT') return;
+    // "new item" boxes also show what's already on the list, so the same thing isn't added twice under another spelling
+    var all = t.matches('#d_item, #n_name, tr.newing input[data-k=name]') ? ['dl_allings', (D().ingredients || []).map(function (i) { return i.name; })] : t.matches('tr.newpack input[data-k=name]') ? ['dl_allpacks', (D().packItems || []).map(function (i) { return i.item; })] : null;
+    if (all) { var dl = document.getElementById(all[0]); if (!dl) { dl = document.createElement('datalist'); dl.id = all[0]; document.body.appendChild(dl); } dl.innerHTML = all[1].map(function (n) { return '<option value="' + esc(n) + '">'; }).join(''); t.dataset.list = all[0]; t.setAttribute('autocomplete', 'off'); }
+    if (t.getAttribute('list')) { t.dataset.list = t.getAttribute('list'); t.removeAttribute('list'); t.setAttribute('autocomplete', 'off'); }
+    if (t.dataset.list) show(t, /^dl_lot/.test(t.dataset.list) && !t.value);
+  } catch (err) { hide(); } });
+  document.addEventListener('input', function (e) { try { var t = e.target; if (t && t.dataset && t.dataset.list && t === document.activeElement) show(t); } catch (err) { hide(); } });
+  document.addEventListener('focusout', function (e) { if (e.target === cur) setTimeout(function () { if (document.activeElement !== cur) hide(); }, 150); });
+  document.addEventListener('scroll', function () { if (cur && box && box.style.display !== 'none') show(cur, /^dl_lot/.test(cur.dataset.list) && !cur.value); }, true);
+  window.addEventListener('hashchange', hide);
+})();
+
 // the yellow note under a box: "isn't on the list – is this new?" with Yes / fix it buttons
 function typedNote(inp, msg, kind) {
   var n = inp.parentNode && inp.parentNode.querySelector('[data-typednote]');
   if (!msg) { if (n) n.remove(); inp.style.background = ''; delete inp.dataset.newok; return; }
   if (!n) { n = document.createElement('div'); n.setAttribute('data-typednote', ''); n.className = 'small'; n.style.cssText = 'color:#8a5a00;margin-top:4px'; inp.insertAdjacentElement('afterend', n); }
   inp.style.background = '#fff4d6'; delete inp.dataset.newok; n.style.color = '#8a5a00';
-  n.innerHTML = '⚠ ' + esc(msg) + (kind ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><button type="button" class="btn sm" data-tn="yes">Yes – save as a new ' + esc(kind) + '</button><button type="button" class="btn soft sm" data-tn="fix">No – let me fix it</button></div>' : '');
+  var addDel = kind === 'batch' && inp.matches('[data-k=batch][data-i]');
+  n.innerHTML = '⚠ ' + esc(msg) + (kind ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">' + (addDel ? '<button type="button" class="btn sm" data-tn="del">Yes – add it to deliveries</button>' : '') + '<button type="button" class="btn ' + (addDel ? 'soft ' : '') + 'sm" data-tn="yes">' + (addDel ? 'Just use it' : 'Yes – save as a new ' + esc(kind)) + '</button><button type="button" class="btn soft sm" data-tn="fix">No – let me fix it</button></div>' : '');
   if (!kind) return;
+  if (addDel) n.querySelector('[data-tn=del]').onclick = function () {
+    var tr = inp.closest('tr'), g = function (k) { var e = tr.querySelector('[data-k=' + k + ']'); return e ? e.value.trim() : ''; };
+    addDeliveryPopup({ item: g('ingredient'), batch: inp.value.trim(), useBy: g('useBy'), unit: g('unit') }, function (d) {
+      if (d.batch !== inp.value.trim()) { inp.value = d.batch; inp.dispatchEvent(new Event('input', { bubbles: true })); }
+      var ub = tr.querySelector('[data-k=useBy]'); if (ub && d.useBy && ub.value !== d.useBy) { ub.value = d.useBy; ub.dispatchEvent(new Event('input', { bubbles: true })); }
+      inp.dataset.newok = '1'; inp.style.background = '#e8f5e9'; n.style.color = '#2e7d32'; n.innerHTML = '✓ Added to deliveries (delivered ' + esc(nice(d.date)) + ') – it\'s now in stock.';
+    });
+  };
   n.querySelector('[data-tn=yes]').onclick = function () { inp.dataset.newok = '1'; inp.style.background = '#e8f5e9'; n.innerHTML = '✓ OK – it\'ll go in as a new ' + esc(kind) + ' when you save. Jonny and Paul will see it to check.'; n.style.color = '#2e7d32'; };
   n.querySelector('[data-tn=fix]').onclick = function () { inp.focus(); inp.select(); };
 }
@@ -2121,6 +2215,9 @@ function drawFinance(r) {
   $('#fi_save').onclick = function () {
     var ing = $$('tr[data-ing]').map(function (tr) { var a = tr.querySelector('[data-k=pack]'), b = tr.querySelector('[data-k=unit]'); return { name: tr.dataset.ing, perPack: a ? num(a.value) : '', perUnit: b ? num(b.value) : '' }; }).filter(function (x) { return x.perPack !== '' || x.perUnit !== ''; });
     var pack = $$('tr[data-pk]').map(function (tr) { return { item: tr.dataset.pk, price: num(tr.querySelector('[data-k=price]').value) }; }).filter(function (x) { return x.price !== ''; });
+    var pl = {}; (r.prices || []).forEach(function (p) { pl[p.name] = p; });
+    if (!packOk(ing.map(function (x) { var p = pl[x.name] || {}, a = String(p.packUnit || p.unit).toLowerCase(), b = String(p.unit).toLowerCase(), sz = !p.packSize ? 1 : a === b ? p.packSize : a === 'g' && b === 'kg' ? p.packSize / 1000 : a === 'kg' && b === 'g' ? p.packSize * 1000 : a === 'ml' && b === 'l' ? p.packSize / 1000 : a === 'l' && b === 'ml' ? p.packSize * 1000 : p.packSize;
+      return { name: x.name, unit: p.unit, packSize: p.packSize, packUnit: p.packUnit, price: x.perUnit !== '' ? x.perUnit : x.perPack / sz }; }))) return;
     $('#fi_save').disabled = true;
     ownerCall({ op: 'prices', d: { ing: ing, pack: pack } }).then(function (x) { if (x.ok) { toast('Prices saved'); drawFinance(x); } else { toast(x.error || 'Could not save'); $('#fi_save').disabled = false; } }).catch(function () { toast('No connection'); $('#fi_save').disabled = false; });
   };
