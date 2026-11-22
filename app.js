@@ -652,7 +652,7 @@ function strathroyDue() {
   var cp = D().creamPlan, pl = cp && cp.plan;
   if (!pl || !cp.delivery || cp.delivery > today() || cp.delivery < addDays(today(), -6)) return null;
   if ((D().lots || []).some(function (l) { return l.date >= cp.delivery && /cream/i.test(l.item); })) return null;
-  var exp = [['Whipping Cream', (pl.creamPacks || 0) * setN('Cream pack litres', 4)], ['Whole Milk', pl.milkL]].filter(function (r) { return r[1] > 0; });
+  var exp = [['Whipping Cream', (pl.creamPacks || 0) * setN('Cream pack litres', 4) + (pl.cream2 || 0) * setN('Cream small jar litres', 2)], ['Whole Milk', pl.milkL]].filter(function (r) { return r[1] > 0; });
   return exp.length ? { cp: cp, exp: exp } : null;
 }
 function fscDue() {
