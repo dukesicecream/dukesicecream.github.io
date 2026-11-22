@@ -422,11 +422,14 @@ function wt(q, u) { var lu = String(u).toLowerCase(); if (lu === 'kg' && q < 1) 
 function packText(name, q, unit) {
   var ing = (D().ingredients || []).find(function (i) { return String(i.name).toLowerCase() === String(name).toLowerCase(); }) || {};
   var lu = String(unit || '').toLowerCase(), iu = String(ing.unit || unit || '').toLowerCase();
-  if (/cream/i.test(name) && !/powder/i.test(name) && lu === 'l') { var cl = setN('Cream pack litres', 4), j = Math.ceil(q / cl - 0.001); return { main: Math.round(q * 10) / 10 + ' L', packs: j + ' × ' + cl + ' L jar' + (j === 1 ? '' : 's') }; }
+  // cream and milk: whole jars / boxes, then the exact litres still to pour – any extra ordered isn't part of the recipe
+  var lit = function (x) { return (Math.round(x * 10) / 10) + ' L'; };
+  if (/cream/i.test(name) && !/powder/i.test(name) && lu === 'l') { var cl = setN('Cream pack litres', 4), j = Math.floor(q / cl + 1e-9), cr = q - j * cl;
+    return { main: lit(q), packs: (j ? j + ' × ' + cl + ' L jar' + (j === 1 ? '' : 's') : '') + (cr > 0.05 ? (j ? ' + ' : '') + lit(cr) : '') }; }
   if (/milk/i.test(name) && !/powder/i.test(name) && lu === 'l') {
-    var bx = setN('Milk box litres', 13.65), sp = setN('Milk box max spare (litres)', 0.5), b = Math.floor(q / bx + 1e-9), rem = q - b * bx, jars = 0;
-    if (rem > 0.01) { if (bx - rem <= sp) b++; else jars = Math.ceil(rem / 2 - 1e-9); }
-    return { main: Math.round(q * 10) / 10 + ' L', packs: (b ? b + ' ' + plural(b, 'box') + ' (' + bx + ' L)' : '') + (b && jars ? ' + ' : '') + (jars ? jars + ' × 2 L jar' + (jars === 1 ? '' : 's') : '') };
+    var bx = setN('Milk box litres', 13.65), sp = setN('Milk box max spare (litres)', 0.5), b = Math.floor(q / bx + 1e-9), rem = q - b * bx;
+    if (rem > 0.01 && bx - rem <= sp) { b++; rem = 0; }
+    return { main: lit(q), packs: (b ? b + ' ' + plural(b, 'box') + ' (' + bx + ' L)' : '') + (rem > 0.05 ? (b ? ' + ' : '') + lit(rem) : '') };
   }
   var ps = Number(ing.packSize) || 0, pt = ing.packType || '';
   var qi = lu === iu ? q : lu === 'g' && iu === 'kg' ? q / 1000 : lu === 'kg' && iu === 'g' ? q * 1000 : lu === 'ml' && iu === 'l' ? q / 1000 : q;
@@ -2120,6 +2123,11 @@ function xmasTubTable(byF) {
       return '<tr' + (bad ? ' style="background:#fdecea"' : '') + '><td>' + esc(f) + '</td><td><b>' + byF[f] + '</b></td><td>' + (s.stock == null ? '<span class="muted">not counted</span>' : s.stock) + '</td><td>' + (s.atCollection == null ? '–' : Math.max(0, s.atCollection)) + (s.perWeek ? '<br><span class="small muted">sells ~' + s.perWeek + '/wk</span>' : '') + '</td><td>' + (bad ? '<b style="color:#b3262e">make ' + s.makeMore + ' more</b>' : '<span class="pill ok">OK</span>') + '</td></tr>';
     }).join('') + '</table></div><p class="small muted">Stock is the last ice cream stock take plus tubs made since, less usual sales.' + ((D().xmas || {}).collection ? ' Collection: ' + esc(nice(D().xmas.collection)) + '.' : ' Add the collection date below to plan for it.') + '</p>';
 }
+// one flavour line on the Christmas set-up: on the page?, name, and (Dukes'mas only) its own price
+function xmasFlRow(f) {
+  return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon' + (f.on ? ' checked' : '') + ' style="width:22px;height:22px"><input data-fname value="' + esc(f.name) + '" placeholder="Add a ' + (f.festive ? 'Dukes\'mas ' : '') + 'flavour">' +
+    (f.festive ? '<span>£</span><input data-fprice type="number" step="0.01" inputmode="decimal" style="width:90px" value="' + esc(f.price || '') + '" placeholder="price">' : '') + '</div>';
+}
 function drawXmas(r, mine) {
   var o = r.orders || [], live = o.filter(function (x) { return x.paid || !mine; });
   var paid = o.filter(function (x) { return x.paid; }), byF = {}, tubs = 0;
@@ -2137,8 +2145,12 @@ function drawXmas(r, mine) {
     '<div class="grid2">' + field('Price per big tub (£)', inp('x_price', s.price, 'number')) + field('Order by (optional)', inp('x_dl', s.deadline)) + field('Collection date (for stock planning)', inp('x_cdate', s.cdate, 'date')) + field('Minimum order (big tubs)', inp('x_min', s.min || 4, 'number')) + '</div>' +
     field('Collection day, time and place', '<textarea id="x_col" placeholder="e.g. Tuesday 23 December, 10am – 4pm at the Dukes shop, Gortin">' + esc(s.collection) + '</textarea>') +
     field('A short note at the top of the page (optional)', '<textarea id="x_intro">' + esc(s.intro) + '</textarea>') +
+    '<h3>🎄 Dukes\'mas Flavours</h3><p class="small muted">Your festive flavours – shown in their own section at the top of the page, at their own price. Leave a flavour\'s price empty to use the Dukes\'mas price.</p>' +
+    field('Dukes\'mas price per big tub (£)', inp('x_dprice', s.dukesmasPrice, 'number', ' placeholder="' + esc(s.price || '') + '"')) + '<div id="x_ffl">' +
+    (r.flavours || []).filter(function (f) { return f.festive; }).concat([{ name: '', on: true, festive: true }]).map(xmasFlRow).join('') +
+    '</div><button class="btn soft sm" type="button" id="x_addffl">+ Another Dukes\'mas flavour</button>' +
     '<h3>Flavours on the page</h3><p class="small muted">Untick to hide one. Type a new flavour in the empty box to add it.</p><div id="x_fl">' +
-    (r.flavours || []).concat([{ name: '', on: true }]).map(function (f) { return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon' + (f.on ? ' checked' : '') + ' style="width:22px;height:22px"><input data-fname value="' + esc(f.name) + '" placeholder="Add a flavour"></div>'; }).join('') +
+    (r.flavours || []).filter(function (f) { return !f.festive; }).concat([{ name: '', on: true }]).map(xmasFlRow).join('') +
     '</div><button class="btn soft sm" type="button" id="x_addfl">+ Another flavour</button>' +
     '<h3>Card payments</h3>' + (r.card ? '<p><span class="pill ok">Stripe connected</span> Payments are checked automatically and customers get a confirmation email.</p>' :
       '<p class="small">Not connected yet. Make a free Stripe account, then in Stripe go to <b>Developers → API keys</b>, copy the <b>Secret key</b> (starts sk_live_) and paste it here yourself. Orders only appear here once they\'re paid.</p>') +
@@ -2162,10 +2174,12 @@ function drawXmas(r, mine) {
   if (!mine) return;
   $('#x_ref').onclick = function () { this.disabled = true; ownerCall({ op: 'xmasRefresh' }).then(function (x) { if (x.ok) drawXmas(x, true); }); };
   $('#x_copy').onclick = function () { navigator.clipboard && navigator.clipboard.writeText(r.page).then(function () { toast('Link copied'); }); };
-  $('#x_addfl').onclick = function () { $('#x_fl').insertAdjacentHTML('beforeend', '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon checked style="width:22px;height:22px"><input data-fname placeholder="Add a flavour"></div>'); };
+  $('#x_addfl').onclick = function () { $('#x_fl').insertAdjacentHTML('beforeend', xmasFlRow({ name: '', on: true })); };
+  $('#x_addffl').onclick = function () { $('#x_ffl').insertAdjacentHTML('beforeend', xmasFlRow({ name: '', on: true, festive: true })); };
   $('#x_save').onclick = function () {
-    var fl = $$('#x_fl > div').map(function (d) { return { name: d.querySelector('[data-fname]').value.trim(), on: d.querySelector('[data-fon]').checked }; }).filter(function (f) { return f.name; });
-    var d = { open: $('#x_open').checked, price: num(val('x_price')), deadline: val('x_dl'), cdate: val('x_cdate'), min: num(val('x_min')), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
+    var rd = function (sel, festive) { return $$(sel + ' > div').map(function (d) { var pe = d.querySelector('[data-fprice]'); return { name: d.querySelector('[data-fname]').value.trim(), on: d.querySelector('[data-fon]').checked, festive: festive, price: pe ? num(pe.value) : '' }; }).filter(function (f) { return f.name; }); };
+    var fl = rd('#x_ffl', true).concat(rd('#x_fl', false));
+    var d = { open: $('#x_open').checked, price: num(val('x_price')), dukesmasPrice: num(val('x_dprice')), deadline: val('x_dl'), cdate: val('x_cdate'), min: num(val('x_min')), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
     if (val('x_key')) d.stripeKey = val('x_key');
     if (d.open && !d.collection) return toast('Add the collection day and time before opening orders');
     this.disabled = true;
