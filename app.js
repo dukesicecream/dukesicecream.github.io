@@ -500,6 +500,10 @@ ROUTES.batch = function (no) {
   var draft = S.drafts['batch:' + no];
   var plan = D().creamPlan, planMix = plan && plan.week && plan.week >= addDays(monday(today()), -7) ? plan.mix : '';
   var planFl = planMix && plan.plan && plan.plan.flavour && (D().flavours || []).indexOf(plan.plan.flavour) >= 0 ? plan.plan.flavour : '';
+  // a week with several batches: fill in the first one that hasn't got a batch record yet
+  var pbs = planMix && plan.plan && plan.plan.batches && plan.plan.batches.length > 1 ? plan.plan.batches : null;
+  if (pbs) { var pb = pbs.find(function (q) { return !(D().batches || []).some(function (r) { return r.date >= plan.week && r.flavour === q.flavour; }); }) || pbs[0];
+    planMix = pb.mix; planFl = (D().flavours || []).indexOf(pb.flavour) >= 0 ? pb.flavour : ''; }
   var x = draft || b || { no: String(set('Next batch number') || ''), flavour: planFl, date: today(), mix: planMix || setN('Base mix litres', 58), start: '', temp: '', hold: '', cool: '', end: '', bb: '', pby: S.user, tub: '', large: '', small: '', label: '', tby: '', comments: '', lines: null };
   var lines = (x.lines && x.lines.length) ? x.lines.map(function (l) { return Object.assign({}, l); }) : recipeLines(x.flavour, x.mix);
   // tub counts: stored as how they were counted; older records only have the totals
