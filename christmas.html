@@ -81,8 +81,8 @@
     <div id="preview" class="note hide">Preview – this page isn't open to customers yet.</div>
     <div id="cancelled" class="note hide">Your payment wasn't completed, so your order isn't confirmed yet. You can try again below.</div>
     <div class="card">
-      <div id="intro" class="small" style="margin-bottom:12px"></div>
-      <div class="info"><span class="ic">🍦</span><div><b>Big tubs (500 ml)</b> – <span id="price"></span><br><span class="muted small">Minimum order <span id="min"></span> tubs – mix and match any flavours</span></div></div>
+      <div id="intro" style="margin-bottom:14px;text-align:center;font-size:20px;font-weight:600"></div>
+      <div class="info"><span class="ic">🍦</span><div>Minimum pre-order <b><span id="min"></span> tubs</b><br><span class="muted small">Mix and match any flavours</span></div></div>
       <div class="info" style="margin-top:10px"><span class="ic">🎁</span><div><b>Collection</b><br><span id="collection" class="muted"></span></div></div>
       <div class="info hide" id="dlrow" style="margin-top:10px"><span class="ic">⏰</span><div><b>Order by</b> <span id="deadline"></span></div></div>
     </div>
@@ -149,18 +149,19 @@
     return n;
   }
   function draw() {
-    $('#price').textContent = gbp(info.price) + ' each'; $('#min').textContent = info.min || 1;
+    $('#min').textContent = info.min || 1;
     $('#collection').textContent = info.collection || 'Collection day and time to be confirmed';
     if (info.deadline) { $('#deadline').textContent = info.deadline; show('#dlrow', true); }
     $('#intro').innerHTML = esc(info.intro).replace(/\n/g, '<br>');
     // Dukes'mas flavours first (their own price), then the usual flavours
     var fest = info.festive || [], all = fest.map(function (x) { return x.name; }).concat(info.flavours);
     fest.forEach(function (x) { PR[x.name] = Number(x.price); });
+    info.flavours.forEach(function (f) { if (PR[f] == null) PR[f] = Number(info.price); });
     var dp = fest.length && fest.every(function (x) { return Number(x.price) === Number(fest[0].price); }) ? Number(fest[0].price) : null;
-    if (fest.length) { $('#price').textContent = gbp(info.price) + (dp !== null && dp !== info.price ? ' each, Dukes\'mas flavours ' + gbp(dp) : ' each'); $('#flhead').textContent = 'Our flavours'; }
+    if (fest.length) $('#flhead').textContent = 'Standard Flavours';
     show('#festcard', fest.length > 0);
     var row = function (f, i) {
-      return '<div class="fl" data-i="' + i + '"><span class="n">' + esc(f) + (PR[f] != null ? '<br><span class="small muted">' + gbp(PR[f]) + ' a tub</span>' : '') + '</span><span class="qty"><button type="button" data-m="-1" aria-label="One less ' + esc(f) + '">−</button>' +
+      return '<div class="fl" data-i="' + i + '"><span class="n">' + esc(f) + (PR[f] != null ? '<br><span class="small muted">' + gbp(PR[f]) + '&nbsp;&nbsp;500ml</span>' : '') + '</span><span class="qty"><button type="button" data-m="-1" aria-label="One less ' + esc(f) + '">−</button>' +
         '<input type="number" inputmode="numeric" min="0" max="50" value="0" aria-label="How many ' + esc(f) + '"><button type="button" data-m="1" aria-label="One more ' + esc(f) + '">+</button></span></div>';
     };
     $('#festive').innerHTML = fest.map(function (x, i) { return row(x.name, i); }).join('');
