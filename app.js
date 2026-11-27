@@ -2141,7 +2141,7 @@ function drawXmas(r, mine) {
   var row = function (x) {
     var lines = String(x.items).split('\n').filter(Boolean).map(function (l) { var m = l.match(/^(\d+)\s*×\s*(.+)$/);
       return '<div style="display:flex;gap:10px;align-items:center;margin:3px 0"><span style="min-width:36px;text-align:center;font-weight:700;background:#eef1f7;border-radius:6px;padding:2px 6px">' + esc(m ? m[1] : '') + '</span><span>' + esc(m ? m[2] : l) + '</span></div>'; }).join('');
-    return '<div class="xo" data-q="' + esc((x.no + ' ' + x.name + ' ' + x.phone).toLowerCase()) + '" style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-start;padding:14px 2px;border-bottom:1px solid #ece6da;break-inside:avoid">' +
+    return '<div class="xo' + (x.collected ? ' xcol' : '') + '" data-oid="' + esc(x.id) + '" data-q="' + esc((x.no + ' ' + x.name + ' ' + x.phone).toLowerCase()) + '" style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-start;padding:14px 2px;border-bottom:1px solid #ece6da;break-inside:avoid">' +
       '<div style="flex:1 1 200px;min-width:180px"><b style="font-size:17px">' + esc(x.name) + '</b><br><span class="small muted">' + esc(x.no) + ' · ' + esc(short(x.date)) + '</span><br><a href="tel:' + esc(x.phone.replace(/[^\d+]/g, '')) + '">' + esc(x.phone) + '</a>' +
         (mine ? '<br><span class="small">' + esc(x.email) + '</span>' : '') + (x.notes ? '<br><i class="small">' + esc(x.notes) + '</i>' : '') + '</div>' +
       '<div style="flex:2 1 260px;min-width:220px">' + lines + '<div class="small muted" style="margin-top:4px">' + x.tubs + ' tub' + (x.tubs === 1 ? '' : 's') + (mine && x.total !== undefined ? ' · <b>' + gbp(x.total) + '</b>' : '') + '</div></div>' +
@@ -2171,22 +2171,49 @@ function drawXmas(r, mine) {
   var vs = r.visits;
   render(back() + '<h1>🎄 Christmas orders</h1>' +
     // order and tub totals are for Jonny only – staff see the per-flavour counts
-    '<div class="card">' + (mine ? '<div class="tiles" style="grid-template-columns:repeat(3,1fr)"><div class="tile"><b style="font-size:24px">' + paid.length + '</b><span>orders</span></div><div class="tile"><b style="font-size:24px">' + tubs + '</b><span>big tubs</span></div><div class="tile"><b style="font-size:24px">' + gbp(money) + '</b><span>taken</span></div></div>' : '') +
+    '<style>@media print{body.xp-left .xcol,body.xp-left #x_counts{display:none!important}}</style>' +
+    '<div class="card" id="x_counts">' + (mine ? '<div class="tiles" style="grid-template-columns:repeat(3,1fr)"><div class="tile"><b style="font-size:24px">' + paid.length + '</b><span>orders</span></div><div class="tile"><b style="font-size:24px">' + tubs + '</b><span>big tubs</span></div><div class="tile"><b style="font-size:24px">' + gbp(money) + '</b><span>taken</span></div></div>' : '') +
     (r.collection || s.collection ? '<p class="small"><b>Collection:</b> ' + esc(r.collection || s.collection) + '</p>' : '') +
     xmasTubTable(byF) + '</div>' +
     (mine && vs ? '<div class="card noprint"><h2>Order page visitors</h2><div class="tiles" style="grid-template-columns:repeat(3,1fr)"><div class="tile"><b style="font-size:24px">' + vs.visitors + '</b><span>people visited</span></div><div class="tile"><b style="font-size:24px">' + vs.ordered + '</b><span>of them ordered</span></div><div class="tile"><b style="font-size:24px">' + (vs.visitors ? Math.round(vs.ordered / vs.visitors * 100) : 0) + '%</b><span>ordered</span></div></div>' +
       '<p class="small muted">Each phone or computer is counted once, however many times they come back, and once more only if they go on to order and pay. Counting started ' + (vs.since ? esc(nice(vs.since)) : 'today') + ', so orders placed before then aren\'t linked to a visit.</p></div>' : '') +
-    '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Orders</h2><button class="btn soft sm noprint" type="button" onclick="window.print()">🖨️ Print orders</button></div>' +
-    '<div class="noprint" style="margin-top:8px">' + inp('x_find', '', 'search', ' placeholder="Search name, phone or order no"') + '</div><div id="x_tab">' + (o.map(row).join('') || '<p class="muted">No paid orders yet.</p>') + '</div>' +
+    '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Orders</h2><span class="noprint" style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn soft sm" type="button" id="x_pall">🖨️ Print all</button><button class="btn soft sm" type="button" id="x_pleft">🖨️ Print not collected</button><button class="btn soft sm" type="button" id="x_dl">⬇️ Download</button></span></div>' +
+    '<p class="small muted noprint" style="margin:6px 0 0">Collected orders move to the bottom of the list.</p>' +
+    '<div class="noprint" style="margin-top:8px">' + inp('x_find', '', 'search', ' placeholder="Search name, phone or order no"') + '</div><div id="x_tab">' + (o.filter(function (x) { return !x.collected; }).concat(o.filter(function (x) { return x.collected; })).map(row).join('') || '<p class="muted">No paid orders yet.</p>') + '</div>' +
     (mine ? '<button class="btn soft sm noprint" id="x_ref" type="button">Check payments now</button>' + (r.backup ? ' <a class="btn soft sm noprint" target="_blank" href="' + esc(r.backup) + '">Orders backup ↗</a>' : '') : '') + '</div>' + setup);
   $('#x_find').oninput = function () { var q = this.value.toLowerCase(); $$('#x_tab .xo').forEach(function (d) { d.style.display = d.dataset.q.indexOf(q) >= 0 || d.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none'; }); };
   // tick box → "✓ Collected" once ticked (tap that to undo)
   var setCol = function (id, on) {
     var box = document.querySelector('[data-colbox="' + id + '"]'), ord = o.find(function (x) { return x.id === id; });
-    var was = ord.collected; ord.collected = on; box.innerHTML = xmasColHtml(ord); wireCol();
+    var was = ord.collected; ord.collected = on; box.innerHTML = xmasColHtml(ord); wireCol(); place(id, on);
     (mine ? ownerCall({ op: 'xmasCollect', id: id, collected: on }) : fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'xmas', k: S.key, op: 'collect', id: id, collected: on }) }).then(function (x) { return x.json(); }))
       .then(function (x) { if (!x.ok) throw new Error(x.error || 'Not saved'); S.oc = null; toast(on ? 'Marked as collected' : 'Marked as not collected'); })
-      .catch(function (e) { ord.collected = was; box.innerHTML = xmasColHtml(ord); wireCol(); toast((e && e.message) || 'No connection – not saved'); });
+      .catch(function (e) { ord.collected = was; box.innerHTML = xmasColHtml(ord); wireCol(); place(id, was); toast((e && e.message) || 'No connection – not saved'); });
+  };
+  // collected orders sit at the bottom; one un-ticked goes back to the end of the not-collected ones
+  var place = function (id, on) {
+    var el = document.querySelector('.xo[data-oid="' + id + '"]'), list = $('#x_tab'); if (!el) return;
+    el.classList.toggle('xcol', on);
+    if (on) list.appendChild(el); else list.insertBefore(el, list.querySelector('.xo.xcol:not([data-oid="' + id + '"])'));
+  };
+  var printIt = function (left) {
+    document.body.classList.toggle('xp-left', left);
+    var done = function () { document.body.classList.remove('xp-left'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done); window.print(); setTimeout(done, 60000);
+  };
+  $('#x_pall').onclick = function () { printIt(false); };
+  $('#x_pleft').onclick = function () { if (!o.some(function (x) { return !x.collected; })) { toast('Every order is collected'); return; } printIt(true); };
+  // spreadsheet of every order – one column per flavour, opens in Excel or Google Sheets
+  $('#x_dl').onclick = function () {
+    var fl = Object.keys(byF), q = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var head = ['Order no', 'Ordered', 'Name', 'Phone'].concat(mine ? ['Email'] : []).concat(fl).concat(['Tubs']).concat(mine ? ['Paid £'] : []).concat(['Notes', 'Collected']);
+    var lines = [head].concat(o.map(function (x) {
+      var n = {}; String(x.items).split('\n').forEach(function (l) { var m = l.match(/^(\d+)\s*×\s*(.+)$/); if (m) n[m[2]] = (n[m[2]] || 0) + Number(m[1]); });
+      return [x.no, x.date, x.name, x.phone].concat(mine ? [x.email] : []).concat(fl.map(function (f) { return n[f] || ''; })).concat([x.tubs]).concat(mine ? [x.total !== undefined ? Number(x.total).toFixed(2) : ''] : []).concat([x.notes, x.collected ? 'Yes' : '']);
+    })).map(function (r) { return r.map(q).join(','); }).join('\r\n');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + lines], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'Dukes Christmas orders ' + new Date().toISOString().slice(0, 10) + '.csv'; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   };
   var wireCol = function () {
     $$('[data-col]').forEach(function (c) { c.onchange = function () { if (c.checked) setCol(c.dataset.col, true); }; });
