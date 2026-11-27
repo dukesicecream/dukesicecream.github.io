@@ -179,6 +179,7 @@
     var d = { name: $('#name').value.trim(), email: $('#email').value.trim(), phone: $('#phone').value.trim(), website: $('#website').value, items: qty };
     if (!d.name || !d.email || !d.phone) { $('#err').textContent = 'Please fill in your name, email and phone number.'; $('#name').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
     if (preview) d.preview = 'jonny';
+    if (VID) d.vid = VID;
     var b = $('#go'); b.disabled = true; b.textContent = 'One moment…';
     fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a: 'xmasorder', d: d }) })
       .then(function (r) { return r.json(); }).then(function (r) {
@@ -205,6 +206,9 @@
     check(0);
     return;
   }
+  // counts this visit once per phone/computer (a random number kept in this browser – nothing personal); not in preview
+  var VID = ''; try { VID = localStorage.getItem('dukes_vid') || ''; if (!VID) { VID = Date.now().toString(36) + Math.random().toString(36).slice(2, 10); localStorage.setItem('dukes_vid', VID); } } catch (e) { }
+  if (!preview && !q.get('order') && VID) { try { fetch(API + '?a=xmasvisit&v=' + encodeURIComponent(VID)).catch(function () { }); } catch (e) { } }
   fetch(API + '?a=xmasinfo').then(function (r) { return r.json(); }).then(function (r) {
     info = r; show('#loading', false);
     if (!r.open && !preview) { show('#closed', true); return; }
