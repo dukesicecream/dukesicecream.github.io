@@ -969,7 +969,39 @@ ROUTES.stock = function () {
     '<div class="card"><h2>Napolis</h2><table class="t"><tr><th>Flavour</th><th>Napolis</th>' + (mine ? '<th class="noprint">Last count</th>' : '') + '</tr>' +
     flv.map(function (f) { var l = last[f];
       return '<tr data-f3="' + esc(f) + '"><td><b>' + esc(f) + '</b></td><td>' + inpF(f, 'napolis', cv(f, 'napolis')) + '</td>' + (mine ? '<td class="muted small noprint">' + (l && l.napolis ? esc(short(l.date)) + ': ' + l.napolis : '–') + '</td>' : '') + '</tr>'; }).join('') + '</table></div>' +
+    '<div class="card"><h2>New flavour</h2><p class="muted small">For a flavour that isn\'t on the lists above. It\'s added to the flavour list when you save, so it shows with the others next time.</p><div id="s_new"></div>' +
+    '<button class="btn soft" type="button" id="s_addnew">+ Add a new flavour</button></div>' +
     '<div class="bar"><button class="btn" id="s_save">Save stock take</button></div>');
+  // a new flavour: name, batch no, best before and how many small and big tubs (typed as plain numbers)
+  var newBox = function () {
+    return '<div class="s_nf" style="border:1px solid #e6dfd0;border-radius:12px;padding:10px 12px;margin-bottom:10px">' +
+      '<div class="grid2">' + field('Flavour name', '<input data-nf="name" autocomplete="off" placeholder="e.g. Christmas Pudding">') + field('Batch no', '<input data-nf="batch" autocomplete="off">') +
+      field('Best before', '<input data-nf="bb" type="date">') + '<div></div>' +
+      field('Small tubs', '<input data-nf="small" type="number" min="0" step="1" inputmode="numeric">') + field('Big tubs', '<input data-nf="large" type="number" min="0" step="1" inputmode="numeric">') + '</div>' +
+      '<button class="btn soft sm" type="button" data-nfdel>✕ Remove</button></div>';
+  };
+  $('#s_addnew').onclick = function () { $('#s_new').insertAdjacentHTML('beforeend', newBox()); var b = $$('#s_new .s_nf').pop(); b.querySelector('[data-nf=name]').focus(); };
+  $('#s_new').addEventListener('click', function (e) { var d = e.target.closest('[data-nfdel]'); if (d) d.closest('.s_nf').remove(); });
+  $('#s_new').addEventListener('input', function () { $('#app').setAttribute('data-dirty', '1'); });
+  // reads the new flavours; returns null (after a message) if something needs fixing
+  var readNew = function () {
+    var out = [], seen = {}, known = {}; flv.forEach(function (f) { known[String(f).trim().toLowerCase()] = f; });
+    var boxes = $$('#s_new .s_nf');
+    for (var i = 0; i < boxes.length; i++) {
+      var g = function (k) { return String(boxes[i].querySelector('[data-nf=' + k + ']').value).trim(); };
+      var name = g('name').replace(/\s+/g, ' '), batch = g('batch'), bb = g('bb'), sm = g('small'), lg = g('large');
+      if (!name && !batch && !bb && sm === '' && lg === '') continue;
+      var k = name.toLowerCase();
+      if (!name) { toast('Type the name of the new flavour'); boxes[i].querySelector('[data-nf=name]').focus(); return null; }
+      if (known[k]) { toast(known[k] + ' is already on the list – count it above'); boxes[i].querySelector('[data-nf=name]').focus(); return null; }
+      if (seen[k]) { toast(name + ' is in twice'); return null; }
+      if (sm === '' && lg === '') { toast('Add how many small or big tubs of ' + name); boxes[i].querySelector('[data-nf=small]').focus(); return null; }
+      seen[k] = 1;
+      var S2 = Math.max(0, Math.round(Number(sm) || 0)), L2 = Math.max(0, Math.round(Number(lg) || 0));
+      out.push({ flavour: name, stacks: '', height: '', lextra: lg === '' ? '' : L2, large: L2, trays: sm === '' ? '' : r2(S2 / per, 2), loose: '', small: S2, napolis: '', batch: batch, bb: bb, isNew: true });
+    }
+    return out;
+  };
   var AMBER = '#fff4d6';
   function calc(tr) {
     var f = tr.dataset.f, el = function (k) { return $$('[data-k=' + k + ']').find(function (e) { return e.dataset.ff === f; }); };
@@ -1000,9 +1032,11 @@ ROUTES.stock = function () {
   missing();
   $('#s_save').onclick = function () {
     var rows = missing(), counted = rows.filter(function (r) { return r.any || r.napolis !== ''; });
+    var extra = readNew(); if (!extra) return;
+    counted = counted.concat(extra);
     if (!counted.length) return toast('Nothing counted yet');
     counted.forEach(function (r) { delete r.any; });
-    var by = val('s_by') || S.user, skipped = rows.length - counted.length;
+    var by = val('s_by') || S.user, skipped = rows.length - (counted.length - extra.length);
     record('iceStock', { id: val('s_date') === t && todayId ? todayId : uid(), date: val('s_date'), by: by, counts: counted }, 'Stock take saved' + (skipped ? ' – ' + skipped + ' flavour' + (skipped > 1 ? 's' : '') + ' not counted' : ''));
     $('#app').removeAttribute('data-dirty'); location.hash = 'home';
   };
