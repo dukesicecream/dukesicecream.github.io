@@ -88,8 +88,8 @@
     </div>
 
     <div class="card hide" id="festcard">
-      <h2>🎄 Dukes'mas Flavours</h2>
-      <p class="small muted" style="margin:0 0 6px">Our festive flavours – only at Christmas</p>
+      <h2>🎄 Our Festive Flavours – <i style="color:#b3262e">Limited stock remaining</i></h2>
+      <p class="small muted" style="margin:0 0 6px">Only at Christmas</p>
       <div id="festive"></div>
     </div>
 
@@ -160,15 +160,18 @@
     var dp = fest.length && fest.every(function (x) { return Number(x.price) === Number(fest[0].price); }) ? Number(fest[0].price) : null;
     if (fest.length) $('#flhead').textContent = 'Standard Flavours';
     show('#festcard', fest.length > 0);
+    var LEFT = info.left || {}, cap = function (f) { return LEFT[f] !== undefined ? Math.min(50, LEFT[f]) : 50; };
     var row = function (f, i) {
-      return '<div class="fl" data-i="' + i + '"><span class="n">' + esc(f) + (PR[f] != null ? '<br><span class="small muted">' + gbp(PR[f]) + '&nbsp;&nbsp;500ml</span>' : '') + '</span><span class="qty"><button type="button" data-m="-1" aria-label="One less ' + esc(f) + '">−</button>' +
-        '<input type="number" inputmode="numeric" min="0" max="50" value="0" aria-label="How many ' + esc(f) + '"><button type="button" data-m="1" aria-label="One more ' + esc(f) + '">+</button></span></div>';
+      var l = LEFT[f], note = l === undefined ? '' : l <= 0 ? '<br><b class="small" style="color:#b3262e">Sold out</b>' : l <= 20 ? '<br><i class="small" style="color:#b3262e">Only ' + l + ' left</i>' : '';
+      if (l !== undefined && l <= 0) return '<div class="fl" data-i="' + i + '" style="opacity:.55"><span class="n">' + esc(f) + note + '</span><span class="qty"></span></div>';
+      return '<div class="fl" data-i="' + i + '"><span class="n">' + esc(f) + (PR[f] != null ? '<br><span class="small muted">' + gbp(PR[f]) + '&nbsp;&nbsp;500ml</span>' : '') + note + '</span><span class="qty"><button type="button" data-m="-1" aria-label="One less ' + esc(f) + '">−</button>' +
+        '<input type="number" inputmode="numeric" min="0" max="' + cap(f) + '" value="0" aria-label="How many ' + esc(f) + '"><button type="button" data-m="1" aria-label="One more ' + esc(f) + '">+</button></span></div>';
     };
     $('#festive').innerHTML = fest.map(function (x, i) { return row(x.name, i); }).join('');
     $('#flavours').innerHTML = info.flavours.map(function (f, i) { return row(f, i + fest.length); }).join('');
     Array.prototype.forEach.call(document.querySelectorAll('.fl'), function (row) {
-      var f = all[Number(row.dataset.i)], inp = row.querySelector('input');
-      var set = function (v) { v = Math.max(0, Math.min(50, Math.floor(Number(v) || 0))); qty[f] = v; inp.value = v; row.classList.toggle('on', v > 0); totals(); };
+      var f = all[Number(row.dataset.i)], inp = row.querySelector('input'); if (!inp) return;
+      var set = function (v) { v = Math.max(0, Math.min(cap(f), Math.floor(Number(v) || 0))); if (Number(inp.value) > cap(f)) setTimeout(function () { $('#err').textContent = 'Only ' + cap(f) + ' tubs of ' + f + ' left.'; }, 0); qty[f] = v; inp.value = v; row.classList.toggle('on', v > 0); totals(); };
       Array.prototype.forEach.call(row.querySelectorAll('button'), function (b) { b.onclick = function () { set((qty[f] || 0) + Number(b.dataset.m)); }; });
       inp.oninput = function () { set(inp.value); };
     });
