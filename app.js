@@ -2124,9 +2124,12 @@ function xmasTubTable(byF) {
     }).join('') + '</table></div><p class="small muted">Stock is the last ice cream stock take plus tubs made since, less usual sales.' + ((D().xmas || {}).collection ? ' Collection: ' + esc(nice(D().xmas.collection)) + '.' : ' Add the collection date below to plan for it.') + '</p>';
 }
 // one flavour line on the Christmas set-up: on the page?, name, and (Dukes'mas only) its own price
-function xmasFlRow(f) {
-  return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" data-fon' + (f.on ? ' checked' : '') + ' style="width:22px;height:22px"><input data-fname value="' + esc(f.name) + '" placeholder="Add a ' + (f.festive ? 'Dukes\'mas ' : '') + 'flavour">' +
-    (f.festive ? '<span>£</span><input data-fprice type="number" step="0.01" inputmode="decimal" style="width:90px" value="' + esc(f.price || '') + '" placeholder="price">' : '') + '</div>';
+function xmasFlRow(f, sold) {
+  var n = f.name && sold ? (sold.paid[f.name] || 0) : 0, h = f.name && sold ? (sold.held[f.name] || 0) : 0, lim = f.limit === '' || f.limit == null ? '' : Number(f.limit);
+  var info = !f.name ? '' : '<span class="small muted" style="white-space:nowrap">' + n + ' sold' + (h ? ' + ' + h + ' paying' : '') + (lim !== '' ? ' · <b style="color:' + (n + h >= lim ? '#b3262e' : '#2e7d32') + '">' + Math.max(0, lim - n - h) + ' left</b>' : '') + '</span>';
+  return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0;flex-wrap:wrap"><input type="checkbox" data-fon' + (f.on ? ' checked' : '') + ' style="width:22px;height:22px"><input data-fname style="flex:1 1 160px" value="' + esc(f.name) + '" placeholder="Add a ' + (f.festive ? 'festive ' : '') + 'flavour">' +
+    (f.festive ? '<span>£</span><input data-fprice type="number" step="0.01" inputmode="decimal" style="width:90px" value="' + esc(f.price || '') + '" placeholder="price">' : '') +
+    '<input data-flimit type="number" min="0" step="1" inputmode="numeric" style="width:100px" value="' + esc(lim) + '" placeholder="Max tubs" title="Most tubs that can be sold – leave blank for no limit">' + info + '</div>';
 }
 function xmasColHtml(x) {
   return x.collected ? '<button type="button" class="btn soft sm" data-uncol="' + esc(x.id) + '" style="color:#2e7d32;font-weight:700" title="Tap to undo">✓ Collected</button>'
@@ -2147,19 +2150,20 @@ function drawXmas(r, mine) {
       '<div style="flex:2 1 260px;min-width:220px">' + lines + '<div class="small muted" style="margin-top:4px">' + x.tubs + ' tub' + (x.tubs === 1 ? '' : 's') + (mine && x.total !== undefined ? ' · <b>' + gbp(x.total) + '</b>' : '') + '</div></div>' +
       '<div style="flex:0 0 150px" data-colbox="' + esc(x.id) + '">' + xmasColHtml(x) + '</div></div>';
   };
-  var s = r.settings || {};
+  var s = r.settings || {}, sold = { paid: r.sold || {}, held: r.held || {} };
   var setup = !mine ? '' : '<div class="card noprint"><h2>Order page</h2>' +
     '<p><a class="btn sm" target="_blank" href="' + esc(r.page) + '?preview=1">Preview the page ↗</a> <button class="btn soft sm" type="button" id="x_copy">Copy the link</button></p>' +
     '<label class="tick"><input type="checkbox" id="x_open"' + (s.open ? ' checked' : '') + '> <b>Orders open</b> – customers can order and pay</label>' +
     '<div class="grid2">' + field('Price per big tub (£)', inp('x_price', s.price, 'number')) + field('Order by (optional)', inp('x_dl', s.deadline)) + field('Collection date (for stock planning)', inp('x_cdate', s.cdate, 'date')) + field('Minimum order (big tubs)', inp('x_min', s.min || 4, 'number')) + '</div>' +
     field('Collection day, time and place', '<textarea id="x_col" placeholder="e.g. Tuesday 23 December, 10am – 4pm at the Dukes shop, Gortin">' + esc(s.collection) + '</textarea>') +
     field('A short note at the top of the page (optional)', '<textarea id="x_intro">' + esc(s.intro) + '</textarea>') +
-    '<h3>🎄 Dukes\'mas Flavours</h3><p class="small muted">Your festive flavours – shown in their own section at the top of the page, at their own price. Leave a flavour\'s price empty to use the Dukes\'mas price.</p>' +
-    field('Dukes\'mas price per big tub (£)', inp('x_dprice', s.dukesmasPrice, 'number', ' placeholder="' + esc(s.price || '') + '"')) + '<div id="x_ffl">' +
-    (r.flavours || []).filter(function (f) { return f.festive; }).concat([{ name: '', on: true, festive: true }]).map(xmasFlRow).join('') +
-    '</div><button class="btn soft sm" type="button" id="x_addffl">+ Another Dukes\'mas flavour</button>' +
+    '<p class="small muted" style="margin-top:14px"><b>Max tubs:</b> the most tubs of a flavour that can be sold. Leave it blank for no limit. When it runs out the flavour shows as sold out on the order page.</p>' +
+    '<h3>🎄 Our Festive Flavours – <i style="color:#b3262e">Limited stock remaining</i></h3><p class="small muted">Your festive flavours – shown in their own section at the top of the page, at their own price. Leave a flavour\'s price empty to use the festive price.</p>' +
+    field('Festive price per big tub (£)', inp('x_dprice', s.dukesmasPrice, 'number', ' placeholder="' + esc(s.price || '') + '"')) + '<div id="x_ffl">' +
+    (r.flavours || []).filter(function (f) { return f.festive; }).concat([{ name: '', on: true, festive: true }]).map(function (f) { return xmasFlRow(f, sold); }).join('') +
+    '</div><button class="btn soft sm" type="button" id="x_addffl">+ Another festive flavour</button>' +
     '<h3>Flavours on the page</h3><p class="small muted">Untick to hide one. Type a new flavour in the empty box to add it.</p><div id="x_fl">' +
-    (r.flavours || []).filter(function (f) { return !f.festive; }).concat([{ name: '', on: true }]).map(xmasFlRow).join('') +
+    (r.flavours || []).filter(function (f) { return !f.festive; }).concat([{ name: '', on: true }]).map(function (f) { return xmasFlRow(f, sold); }).join('') +
     '</div><button class="btn soft sm" type="button" id="x_addfl">+ Another flavour</button>' +
     '<h3>Card payments</h3>' + (r.card ? '<p><span class="pill ok">Stripe connected</span> Payments are checked automatically and customers get a confirmation email.</p>' :
       '<p class="small">Not connected yet. Make a free Stripe account, then in Stripe go to <b>Developers → API keys</b>, copy the <b>Secret key</b> (starts sk_live_) and paste it here yourself. Orders only appear here once they\'re paid.</p>') +
@@ -2171,16 +2175,24 @@ function drawXmas(r, mine) {
   var vs = r.visits;
   render(back() + '<h1>🎄 Christmas orders</h1>' +
     // order and tub totals are for Jonny only – staff see the per-flavour counts
-    '<style>@media print{body.xp-left .xcol,body.xp-left #x_counts{display:none!important}}</style>' +
+    '<style>@media print{body.xp-left .xcol,body.xp-left #x_counts{display:none!important}}@media screen{.noscreen{display:none!important}}</style>' +
     '<div class="card" id="x_counts">' + (mine ? '<div class="tiles" style="grid-template-columns:repeat(3,1fr)"><div class="tile"><b style="font-size:24px">' + paid.length + '</b><span>orders</span></div><div class="tile"><b style="font-size:24px">' + tubs + '</b><span>big tubs</span></div><div class="tile"><b style="font-size:24px">' + gbp(money) + '</b><span>taken</span></div></div>' : '') +
     (r.collection || s.collection ? '<p class="small"><b>Collection:</b> ' + esc(r.collection || s.collection) + '</p>' : '') +
     xmasTubTable(byF) + '</div>' +
     (mine && vs ? '<div class="card noprint"><h2>Order page visitors</h2><div class="tiles" style="grid-template-columns:repeat(3,1fr)"><div class="tile"><b style="font-size:24px">' + vs.visitors + '</b><span>people visited</span></div><div class="tile"><b style="font-size:24px">' + vs.ordered + '</b><span>of them ordered</span></div><div class="tile"><b style="font-size:24px">' + (vs.visitors ? Math.round(vs.ordered / vs.visitors * 100) : 0) + '%</b><span>ordered</span></div></div>' +
       '<p class="small muted">Each phone or computer is counted once, however many times they come back, and once more only if they go on to order and pay. Counting started ' + (vs.since ? esc(nice(vs.since)) : 'today') + ', so orders placed before then aren\'t linked to a visit.</p></div>' : '') +
-    '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Orders</h2><span class="noprint" style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn soft sm" type="button" id="x_pall">🖨️ Print all</button><button class="btn soft sm" type="button" id="x_pleft">🖨️ Print not collected</button><button class="btn soft sm" type="button" id="x_dl">⬇️ Download</button></span></div>' +
-    '<p class="small muted noprint" style="margin:6px 0 0">Collected orders move to the bottom of the list.</p>' +
-    '<div class="noprint" style="margin-top:8px">' + inp('x_find', '', 'search', ' placeholder="Search name, phone or order no"') + '</div><div id="x_tab">' + (o.filter(function (x) { return !x.collected; }).concat(o.filter(function (x) { return x.collected; })).map(row).join('') || '<p class="muted">No paid orders yet.</p>') + '</div>' +
+    '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2 style="margin:0">Orders <span class="small muted" style="font-weight:normal">(' + o.length + ')</span></h2><span class="noprint" style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" type="button" id="x_fold"></button><button class="btn soft sm" type="button" id="x_pall">🖨️ Print all</button><button class="btn soft sm" type="button" id="x_pleft">🖨️ Print not collected</button><button class="btn soft sm" type="button" id="x_dl">⬇️ Download</button></span></div>' +
+    '<div id="x_olist"><p class="small muted noprint" style="margin:6px 0 0">Collected orders move to the bottom of the list.</p>' +
+    '<div class="noprint" style="margin-top:8px">' + inp('x_find', '', 'search', ' placeholder="Search name, phone or order no"') + '</div><div id="x_tab">' + (o.filter(function (x) { return !x.collected; }).concat(o.filter(function (x) { return x.collected; })).map(row).join('') || '<p class="muted">No paid orders yet.</p>') + '</div></div>' +
     (mine ? '<button class="btn soft sm noprint" id="x_ref" type="button">Check payments now</button>' + (r.backup ? ' <a class="btn soft sm noprint" target="_blank" href="' + esc(r.backup) + '">Orders backup ↗</a>' : '') : '') + '</div>' + setup);
+  // fold the order list away so the rest of the page is easy to reach (remembered on this device; printing always shows them)
+  var fold = function (hide) {
+    $('#x_olist').classList.toggle('noscreen', hide); $('#x_fold').textContent = hide ? '▼ Show orders' : '▲ Hide orders';
+    try { localStorage.setItem('dukes_xmas_fold', hide ? '1' : ''); } catch (e) { }
+  };
+  var folded = false; try { folded = localStorage.getItem('dukes_xmas_fold') === '1'; } catch (e) { }
+  fold(folded);
+  $('#x_fold').onclick = function () { fold(!$('#x_olist').classList.contains('noscreen')); };
   $('#x_find').oninput = function () { var q = this.value.toLowerCase(); $$('#x_tab .xo').forEach(function (d) { d.style.display = d.dataset.q.indexOf(q) >= 0 || d.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none'; }); };
   // tick box → "✓ Collected" once ticked (tap that to undo)
   var setCol = function (id, on) {
@@ -2226,7 +2238,7 @@ function drawXmas(r, mine) {
   $('#x_addfl').onclick = function () { $('#x_fl').insertAdjacentHTML('beforeend', xmasFlRow({ name: '', on: true })); };
   $('#x_addffl').onclick = function () { $('#x_ffl').insertAdjacentHTML('beforeend', xmasFlRow({ name: '', on: true, festive: true })); };
   $('#x_save').onclick = function () {
-    var rd = function (sel, festive) { return $$(sel + ' > div').map(function (d) { var pe = d.querySelector('[data-fprice]'); return { name: d.querySelector('[data-fname]').value.trim(), on: d.querySelector('[data-fon]').checked, festive: festive, price: pe ? num(pe.value) : '' }; }).filter(function (f) { return f.name; }); };
+    var rd = function (sel, festive) { return $$(sel + ' > div').map(function (d) { var pe = d.querySelector('[data-fprice]'); var le = d.querySelector('[data-flimit]'), lv = le ? String(le.value).trim() : ''; return { name: d.querySelector('[data-fname]').value.trim(), on: d.querySelector('[data-fon]').checked, festive: festive, price: pe ? num(pe.value) : '', limit: lv === '' ? '' : Math.max(0, Math.floor(Number(lv) || 0)) }; }).filter(function (f) { return f.name; }); };
     var fl = rd('#x_ffl', true).concat(rd('#x_fl', false));
     var d = { open: $('#x_open').checked, price: num(val('x_price')), dukesmasPrice: num(val('x_dprice')), deadline: val('x_dl'), cdate: val('x_cdate'), min: num(val('x_min')), collection: $('#x_col').value.trim(), intro: $('#x_intro').value.trim(), flavours: fl };
     if (val('x_key')) d.stripeKey = val('x_key');
